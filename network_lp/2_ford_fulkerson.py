@@ -161,9 +161,9 @@ def run_max_flow_analysis(file_path):
     else:
         for detail in iteration_details:
             output += f"\n\n--- ITERATION {detail['iteration']} ---"
-            output += f"\nPath found: {detail['path']}"
-            output += f"\nFlow increased (Delta): {detail['path_flow']}"
-            output += f"\nCurrent total flow: {detail['current_max_flow']}"
+            output += f"\n>>> Path: {detail['path']}"
+            output += f"\n>>> Delta: {detail['path_flow']}"
+            output += f"\nCurr max flow: {detail['current_max_flow']}"
             output += "\n\n  >>> Residual Graph Updates:"
             output += "\n  | Residual Edge (u,v) | Old -> New |"
             output += "\n  |:------------------:|:-----------:|"
@@ -190,7 +190,7 @@ def run_max_flow_analysis(file_path):
         for (u,v), cap in sorted(min_cut_arcs):
             output += f"\n- Edge ({u}, {v}): Capacity {cap}"
 
-    output += "\n\n3. FINAL FLOW VECTOR (Flow x on original edges)"
+    output += "\n\n3. FINAL MAX FLOW (Flow x on original edges)"
     output += "\n" + "-"*50
     
     original_arcs_order = []
