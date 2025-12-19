@@ -25,10 +25,10 @@ def read_file(filename):
     mode = None
 
     for line in lines:
-        if line == "[PUNTO]":
+        if line == "[POINT]":
             mode = "POINT"
             continue
-        elif line == "[VINCOLI]":
+        elif line == "[CONSTRAINTS]":
             mode = "CONSTR"
             continue
 
