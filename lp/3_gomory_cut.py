@@ -138,13 +138,14 @@ def solve_gomory(A, b, signs, c):
             print(f"  {names_list[i]:<4}: {val:8.4f}")
 
     # find B
-    basis_indices = []
+    basis_idxs = []
+    basis_print = [] # to print 1-based idxs
     for idx, var in enumerate(vars_gurobi):
         if var.VBasis == 0: # 0 = Basic
-            basis_indices.append(idx)
-            
-    basis_names = [names_list[i] for i in basis_indices]
-    print(f"\nB: {basis_indices} (vars: {basis_names})")
+            basis_idxs.append(idx)
+            basis_print.append(idx+1)
+    basis_names = [names_list[i] for i in basis_idxs]
+    print(f"\nB: {basis_print} (vars: {basis_names})")
 
     # A_total = [A | S]
     S_mat = np.zeros((m, m))
@@ -153,9 +154,31 @@ def solve_gomory(A, b, signs, c):
         
     A_total = np.hstack([A, S_mat])
     
-    # A_B^-1
+    # Identify Non-Basic Indices
+    non_basis_idxs = [i for i in range(A_total.shape[1]) if i not in basis_idxs]
+    non_basis_names = [names_list[i] for i in non_basis_idxs]
+
+    # --- A_B, A_N ---
     try:
-        B_mat = A_total[:, basis_indices] 
+        B_mat = A_total[:, basis_idxs]
+        
+        # PRINT A_B
+        print("\n--- A_B ---")
+        for i in range(m):
+            row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in B_mat[i, :]]
+            print(f"  Row {i+1}: " + "  ".join(row_vals))
+        
+        # PRINT A_N
+        if non_basis_idxs:
+            A_N = A_total[:, non_basis_idxs]
+            print("\n--- A_N ---")
+            print(f"  Cols: {non_basis_names}")
+            for i in range(m):
+                row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in A_N[i, :]]
+                print(f"  Row {i+1}: " + "  ".join(row_vals))
+        else:
+            A_N = None
+
         if B_mat.shape[1] != m:
             print(f"Base dimension error.")
             return
@@ -164,19 +187,30 @@ def solve_gomory(A, b, signs, c):
         print("Base matrix inversion error:", e)
         return
 
+    # --- A_B^-1 ---
     print("\n--- A_B^-1 ---")
     for i in range(m):
-        row_vals = [f"{val:8.4f}" for val in B_inv[i, :]]
+        row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in B_inv[i, :]]
         print(f"  Row {i+1}: " + "  ".join(row_vals))
+
+    # --- Atilde = A_B^-1 * A_N ---
+    if A_N is not None:
+        A_tilde = B_inv @ A_N
+        
+        print("\n--- A_B^-1 * A_N ---")
+        print(f"  Non-basic vars: {non_basis_names}")
+        for i in range(m):
+            row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in A_tilde[i, :]]
+            print(f"  Row {i+1}: " + "  ".join(row_vals))
 
     x_B_val = B_inv @ b
     
-    # --- find fractional parts that will generate a cut plane ---
+    # --- find fractional parts that will generate a cut ---
     print("\n--- FRACTIONAL ROWS ---")
     fractional_rows = []
     
-    for i in range(len(basis_indices)):
-        global_idx = basis_indices[i]
+    for i in range(len(basis_idxs)):
+        global_idx = basis_idxs[i]
         var_name = names_list[global_idx]
         val = x_B_val[i]
         f0 = get_fractional_part(val)
@@ -192,7 +226,7 @@ def solve_gomory(A, b, signs, c):
         print("No fractional rows found.")
     else:
         for row_idx, f0, val in fractional_rows:
-            global_idx = basis_indices[row_idx]
+            global_idx = basis_idxs[row_idx]
             var_name = names_list[global_idx]
             current_row_num = row_idx + 1
             
@@ -214,7 +248,7 @@ def solve_gomory(A, b, signs, c):
                 row_tableau[j] = coeff
                 
                 is_basic = (j == global_idx)
-                if abs(coeff) > 1e-4 and (j not in basis_indices or is_basic):
+                if abs(coeff) > 1e-4 and (j not in basis_idxs or is_basic):
                     product_terms = []
                     for p_val, a_val in zip(row_B_inv, col_vec):
                         product_terms.append(f"({p_val:.3f}*{a_val:.3g})")
@@ -241,7 +275,6 @@ def solve_gomory(A, b, signs, c):
                 fj = get_fractional_part(coeff)
                 int_part = math.floor(coeff + 1e-9)
                 
-                # --- MODIFICA QUI: Formato esplicito f = val - floor(val) ---
                 val_str = format_frac(coeff)
                 fj_str = format_frac(fj)
                 
