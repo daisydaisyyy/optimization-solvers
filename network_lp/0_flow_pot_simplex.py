@@ -9,7 +9,7 @@ def parse_graph(file_path):
         with open(file_path, 'r') as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith('#') or line.startswith('[source'):
                     continue
 
                 match = re.match(r'(\d+)-(\d+):\s*\(\s*(\d+),\s*(\d+)\s*\)', line)
@@ -63,14 +63,8 @@ def parse_partition(file_path):
     
     return T, U
 
-def build_tree_structure(T, nodes):
-    adj = {node: [] for node in nodes}
-    for u, v in T:
-        adj[u].append(v)
-        adj[v].append(u)
-    return adj
-
 def calculate_flow_tree(edges, nodes, node_costs, T, U):
+    """Calcola il flusso iniziale risolvendo il sistema lineare sull'albero."""
     flow = {}
     
     for edge in edges:
@@ -241,7 +235,31 @@ def check_degeneracy(flow, potential, T, U, edges):
 
 def simplex_iteration(edges, nodes, node_costs, T, U, flow, potential):
     L = set(edges.keys()) - T - U
-    entering_edge = (1, 3)
+    entering_edge = None
+    
+    # choose entering edge
+    sorted_edges = sorted(edges.keys())
+    for edge in sorted_edges:
+        if edge in T:
+            continue
+            
+        u, v = edge
+        cost = edges[edge]['cost']
+        pi_u = potential[u]
+        pi_v = potential[v]
+        reduced_cost = cost - (pi_v - pi_u)
+        
+        if edge in U:
+            if reduced_cost > 0.001:
+                entering_edge = edge
+                break
+        else: # edge in L
+            if reduced_cost < -0.001:
+                entering_edge = edge
+                break
+    
+    if entering_edge is None:
+        return None, None, "Optimal solution reached"
     
     print(f"\n>>> ENTERING EDGE: {entering_edge}")
     i, j = entering_edge
@@ -250,6 +268,7 @@ def simplex_iteration(edges, nodes, node_costs, T, U, flow, potential):
     print(f"    Cost: {cost}, Reduced cost: {reduced_cost:.2f}")
     print(f"    Edge is in {'L' if entering_edge in L else 'U'}")
     
+    # cycle
     tree_adj = {node: [] for node in nodes}
     for u, v in T:
         tree_adj[u].append(v)
@@ -295,11 +314,25 @@ def simplex_iteration(edges, nodes, node_costs, T, U, flow, potential):
         else:
             print(f"      Edge {edge}: increase flow by θ (forward)")
     
-    print(f"\n>>> CALCULATE THETA+ AND THETA-")
-    theta_plus = edges[entering_edge]['capacity'] - flow.get(entering_edge, 0)
-    print(f"    Entering edge {entering_edge}: residual capacity = {theta_plus}")
-    print(f"    θ+ = {theta_plus}")
+    print(f"\n>>> CALCULATE θ+ AND θ-")
     
+    # θ+: min(resid entering edge, resid forward edges)
+    theta_plus = edges[entering_edge]['capacity'] - flow.get(entering_edge, 0)
+    limiting_edge_plus = entering_edge
+    
+    print(f"    Entering edge {entering_edge}: residual capacity = {theta_plus}")
+
+    for edge, direction in cycle_edges:
+        if direction == 'forward':
+            residual = edges[edge]['capacity'] - flow.get(edge, 0)
+            print(f"    Edge {edge} (forward): residual capacity = {residual}")
+            if residual < theta_plus:
+                theta_plus = residual
+                limiting_edge_plus = edge
+                
+    print(f"    θ+ = {theta_plus} (edge: {limiting_edge_plus})")
+    
+    # theta_minus: min(flusso archi backward)
     theta_minus = float('inf')
     limiting_edge_minus = None
     
@@ -314,35 +347,76 @@ def simplex_iteration(edges, nodes, node_costs, T, U, flow, potential):
     if theta_minus == float('inf'):
         print(f"    θ- = ∞ (no backward edge in cycle)")
     else:
-        print(f"    θ- = {theta_minus} (limited by edge {limiting_edge_minus})")
+        print(f"    θ- = {theta_minus} (edge: {limiting_edge_minus})")
     
     theta = min(theta_plus, theta_minus)
-    print(f"\n    θ = min(θ+, θ-) = min({theta_plus}, {theta_minus if theta_minus != float('inf') else '∞'}) = {theta}")
+    print(f"\n    θ = min(θ+, θ-) = {theta}")
     
-    leaving_edge = limiting_edge_minus if theta == theta_minus else entering_edge
+    # update flow
+    new_flow = flow.copy()
+    
+    # update entering edge flow (flow + theta)
+    new_flow[entering_edge] += theta
+    
+    # update cycle flow (+ / - theta)
+    for edge, direction in cycle_edges:
+        if direction == 'forward':
+            new_flow[edge] += theta
+        else: # backward
+            new_flow[edge] -= theta
+
+    # precision errors fixes            
+    for edge in new_flow:
+        if abs(new_flow[edge]) < 1e-9: new_flow[edge] = 0
+        if abs(new_flow[edge] - edges[edge]['capacity']) < 1e-9: new_flow[edge] = edges[edge]['capacity']
+
+    # update T,L,U
+    # θ = θ-: edge becomes empty -> goes in L
+    # θ = θ+: edge becomes full -> goes in U
+
+    if theta == theta_minus:
+        leaving_edge = limiting_edge_minus
+        target_set = 'L'
+    else:
+        leaving_edge = limiting_edge_plus
+        target_set = 'U'
+
     print(f"\n>>> LEAVING EDGE: {leaving_edge}")
-    print(f"    Transferable flow (theta): {theta}")
+    print(f"    θ: {theta}")
     
     new_T = T.copy()
     new_U = U.copy()
     new_L = L.copy()
     
-    new_T.remove(leaving_edge)
-    new_T.add(entering_edge)
-    
-    if entering_edge in new_L:
-        new_L.remove(entering_edge)
-    elif entering_edge in new_U:
-        new_U.remove(entering_edge)
-    
-    new_L.add(leaving_edge)
+    if leaving_edge == entering_edge:
+        # edge doesn't go in T
+        if entering_edge in L:
+            new_L.remove(entering_edge)
+            new_U.add(entering_edge)
+        else:
+            new_U.remove(entering_edge)
+            new_L.add(entering_edge)
+    else:
+        # swap leaving and entering edge
+        new_T.remove(leaving_edge)
+        new_T.add(entering_edge)
+        
+        # remove entering from old partition
+        if entering_edge in L: new_L.remove(entering_edge)
+        elif entering_edge in U: new_U.remove(entering_edge)
+        
+        # remove entering from old partition based on its final flow
+        if new_flow[leaving_edge] <= 0.001: # approx
+            new_L.add(leaving_edge)
+        else:
+            new_U.add(leaving_edge)
     
     print(f"\n>>> NEW PARTITION:")
     print(f"    T: {sorted(new_T)}")
     print(f"    U: {sorted(new_U)}")
     print(f"    L: {sorted(new_L)}")
     
-    return (new_T, new_U), "Iteration completed"
+    return (new_T, new_U), new_flow, "Iteration completed"
 
 if __name__ == "__main__":
     GRAPH_FILE = 'graph.txt'
@@ -369,11 +443,10 @@ if __name__ == "__main__":
     print(f"  T (basic edges): {sorted(T)}")
     print(f"  U (saturated edges):  {sorted(U)}")
     print(f"  L (free edges):  {sorted(L)}")
-    print(f"\nNode costs (b): {node_costs}")
     
+    # initial flow
     flow = calculate_flow_tree(edges, nodes, node_costs, T, U)
-    print("\nFLOW")
-
+    print("\nFLOW (Initial)")
     
     edges_list = sorted(edges.keys())
     flow_vector = []
@@ -385,7 +458,7 @@ if __name__ == "__main__":
         flow_vector.append(f)
         print(f"Edge {edge}: flow = {f:>3}, capacity = {cap:>2} [{partition}]")
     
-    print(f"\nFlow vector: ({', '.join(map(str, flow_vector))})\n")
+    print(f"\nFlow: x = ({', '.join(map(str, flow_vector))})\n")
     
     is_feasible, feasibility_violations = check_flow_feasibility(flow, node_costs, edges, nodes)
     if not is_feasible:
@@ -393,59 +466,71 @@ if __name__ == "__main__":
         for v in feasibility_violations:
             print(f"  - {v}")
     
+    # initial potential
     potential = calculate_potential(edges, nodes, T)
     
-    print("POTENTIAL")
+    print("POTENTIAL (Initial)")
+    pi_vector = []
     for node in sorted(nodes):
         pi = potential.get(node)
+        pi_vector.append(str(pi))
         print(f"Node {node}: π = {pi}")
+        
+    print(f"\nPotential: π = ({', '.join(pi_vector)})\n")
     
     is_optimal, violations = check_flow_optimality(edges, flow, potential, T, U)
     
     if is_optimal:
-        print("\n✓ Flow is OPTIMAL (all optimality conditions satisfied)")
+        print("\nFlow is OPTIMAL (all optimality conditions satisfied)")
     else:
-        print("\n✗ Flow is NOT optimal. Violations:")
+        print("\nFlow is NOT optimal. Violations:")
         for v in violations:
             print(f"  - {v}")
     
     flow_deg, flow_deg_arcs, pot_deg, pot_deg_arcs = check_degeneracy(flow, potential, T, U, edges)
     
     if flow_deg:
-        print(f"✗ Flow is DEGENERATE")
-        print(f"  Edges in T with flow = 0 or = capacity: {flow_deg_arcs}")
+        print(f"Flow is DEGENERATE")
+        print(f"    Edges in T with flow = 0 or = capacity: {flow_deg_arcs}")
     else:
-        print("✓ Flow is NOT degenerate")
+        print("Flow is NOT degenerate")
     
     if pot_deg:
         print(f" Potential is DEGENERATE")
         print(f"  Edges in L with reduced cost = 0: {pot_deg_arcs}")
     else:
-        print("  Potential is NOT degenerate")
+        print("\nPotential is NOT degenerate")
     
     if not is_optimal:
-        print("\nSIMPLEX ITERATION")
+        print("\n--- SIMPLEX ITERATION ---")
         
-        result = simplex_iteration(edges, nodes, node_costs, T, U, flow, potential)
+        result_partitions, new_flow, msg = simplex_iteration(edges, nodes, node_costs, T, U, flow, potential)
         
-        if result[0] is not None:
-            new_T, new_U = result[0]
-            print("\n✓ Simplex iteration completed!")
-            print("\nTo continue optimization, update the file with:")
+        if result_partitions is not None:
+            new_T, new_U = result_partitions
+            print("\nSimplex iteration completed!")
+            print("\nNew partition:")
             print(f"T = {{{', '.join([f'({u},{v})' for u, v in sorted(new_T)])}}}")
             print(f"U = {{{', '.join([f'({u},{v})' for u, v in sorted(new_U)])}}}")
             
-            print("\n--- Recalculate with new partition ---")
-            new_flow = calculate_flow_tree(edges, nodes, node_costs, new_T, new_U)
             new_potential = calculate_potential(edges, nodes, new_T)
             
             print("\nNew flow:")
+            new_flow_vector = []
             for edge in sorted(edges.keys()):
-                print(f"  {edge}: {new_flow.get(edge, 0)}")
+                val = new_flow.get(edge, 0)
+                new_flow_vector.append(str(val))
+                print(f"  {edge}: {val}")
+            
+            print(f"Flow: x = ({', '.join(new_flow_vector)})")
             
             print("\nNew potential:")
+            new_pot_vector = []
             for node in sorted(nodes):
-                print(f"  Node {node}: π = {new_potential.get(node)}")
+                val = new_potential.get(node)
+                new_pot_vector.append(str(val))
+                print(f"  Node {node}: π = {val}")
+            
+            print(f"Potential: π = ({', '.join(new_pot_vector)})")
         else:
-            print("\n" + result[1])
-
+            print("\n" + msg)
