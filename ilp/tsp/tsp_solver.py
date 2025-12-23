@@ -343,7 +343,7 @@ class TSPSolver:
         print("\n" + "="*60)
         
         cycle_str = self.reconstruct_cycle(self.best_solution_edges)
-        print(f"1. The optimal solution is the cycle {cycle_str} (v_S: {self.global_ub}).")
+        print(f"1. optimal cycle: {cycle_str} (v_S: {self.global_ub}).")
     
         print("\n2. Edge cost changes question:")
         raw_edge = input("   Enter edge whose cost changes (e.g. x12): ")

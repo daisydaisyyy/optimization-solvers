@@ -141,7 +141,7 @@ def solve_gomory(A, b, signs, c):
     basis_idxs = []
     basis_print = [] # to print 1-based idxs
     for idx, var in enumerate(vars_gurobi):
-        if var.VBasis == 0: # 0 = Basic
+        if var.VBasis == 0: # in B
             basis_idxs.append(idx)
             basis_print.append(idx+1)
     basis_names = [names_list[i] for i in basis_idxs]
