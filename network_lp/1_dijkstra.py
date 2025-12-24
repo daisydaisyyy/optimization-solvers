@@ -157,9 +157,9 @@ if __name__ == "__main__":
     total_supply = -(len(nodes) - 1) * demand
     for n in nodes:
         if n == START_NODE:
-            balances[n] = total_supply # set source node weight = nodes number - 1 (itself)
+            balances[n] = total_supply # set source node balance = -(nodes number - 1 (itself))
         else:
-            balances[n] = demand # other nodes with weight = 1
+            balances[n] = demand # other nodes with balance = 1
     
     if edges:
         history, final_dist, final_prev = dijkstra_with_history(edges, nodes, START_NODE)
