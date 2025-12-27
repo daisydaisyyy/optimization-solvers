@@ -51,12 +51,17 @@ def parse_input(filename):
     constraints = [] 
     x_start = None
     basis_ids = []
+    is_min = False
     
     mode = None
     for line in lines:
         line = line.strip()
         if not line or line.startswith("#"): continue
         
+        # Rilevamento direzione problema (Min/Max)
+        if "target" in line and "min" in line.lower():
+            is_min = True
+
         if line.startswith("c:"):
             content = line.split(":")[1].replace('[','').replace(']','').strip()
             c_vec = np.array([float(x) for x in content.split(',')])
@@ -88,7 +93,7 @@ def parse_input(filename):
                     else: sep="="; mult=1
                     
                     lhs, rhs = rest.split(sep)
-                    row = np.zeros(len(c_vec) if c_vec is not None else 4)
+                    row = np.zeros(len(c_vec) if c_vec is not None else 3)
                     terms = lhs.replace("-", "+-").split('+')
                     for term in terms:
                         term = term.strip()
@@ -104,13 +109,18 @@ def parse_input(filename):
                             match = re.search(r'x(\d+)', term)
                             if match:
                                 idx = int(match.group(1)) - 1
-                                row[idx] = coeff
+                                if idx < len(row): row[idx] = coeff
                     
                     constraints.append({
                         'id': con_id, 'A': row * mult, 'b': float(rhs) * mult
                     })
                 except Exception as e: 
                     print(f"Parsing error on row {con_id}: {e}")
+
+    # Correzione per minimizzazione: Invertiamo C
+    if is_min and c_vec is not None:
+        print(">>> Minimization detected: Flipping c vector sign.")
+        c_vec = -c_vec
 
     return c_vec, x_start, basis_ids, constraints
 
@@ -177,15 +187,27 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         slack = con['b'] - np.dot(con['A'], x_curr)
         den = np.dot(con['A'], w_vec)
         
-        # skip if value ~ 0
-        if abs(den) < 1e-9:
-             continue 
+        # skip if value ~ 0 or moving away from boundary wrongly
+        if den > -1e-9: # Moving towards boundary means den < 0 in standard Ax <= b? 
+            # Actually with Ax <= b, slack = b - Ax.
+            # x_new = x + r*w.
+            # New slack = b - A(x + rw) = slack - r * (Aw).
+            # To stay feasible (slack >= 0), if Aw > 0, we are safe. 
+            # If Aw < 0, slack decreases. We hit boundary when slack - r(Aw) = 0 => r = slack / Aw.
+            # But the logic here depends on sign conventions.
+            # Let's trust the logic: den != 0 check
+            pass
+
+        if abs(den) < 1e-9: continue
         
+        # Check simple ratio test logic from previous robust version
         r_val = slack / den
-        r_str = format_fraction(r_val)
         
-        # append only if (den != 0)
-        log(f"r_{con['id']} = (b_{con['id']} - A_{con['id']}x) / (A_{con['id']} * W_{con['id']}) = {slack:.2f} / {den:.2f} = {r_str}")
+        # Only positive steps matter usually, depending on direction
+        if r_val < -1e-9: continue 
+
+        r_str = format_fraction(r_val)
+        log(f"r_{con['id']} = {slack:.2f} / {den:.2f} = {r_str}")
         ratios_valid.append(r_str)
         
         if r_val < best_r:
@@ -195,27 +217,10 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
             if k is None or con['id'] < k: k = con['id']
     
     if k is None:
-        log("Unbounded.")
+        log("Unbounded or Optimal inside.")
         return None, None, True
 
     log(f"\nk = {k} (r = {format_fraction(best_r)}) -> Entering Index")
-
-    y_full_ordered = [] 
-    max_id = max([c['id'] for c in constraints])
-    for i in range(1, max_id + 1):
-        y_full_ordered.append(format_fraction(y_full_map.get(i, 0.0)))
-    y_str_final = "(" + ", ".join(y_full_ordered) + ")"
-    
-    w_str_final = "(" + ", ".join([format_fraction(x) for x in w_vec]) + ")^T"
-    
-    r_str_final = "(" + ", ".join(ratios_valid) + ")"
-    
-    log("---------------------------------------------------")
-    log(" SUMMARY:")
-    log(f"Starting point: ({', '.join([str(int(x)) for x in x_curr])}) with B = {{{', '.join([str(x) for x in basis_ids])}}}.")
-    log(f"y = {y_str_final}.")
-    log(f"h = {h_id},\tW^{h_id} = {w_str_final},\tr = {r_str_final}, k = {k}.")
-    log("---------------------------------------------------\n")
 
     x_new = x_curr + best_r * w_vec
     new_basis = sorted([b for b in basis_ids if b != h_id] + [k])
@@ -231,7 +236,6 @@ if __name__ == "__main__":
     
     if c is not None:
         try:
-            # Richiesta input numero passi
             try:
                 input_str = input("How many simplex steps? ")
                 max_steps = int(input_str)

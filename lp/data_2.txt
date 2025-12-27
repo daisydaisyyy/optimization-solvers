@@ -16,7 +16,7 @@ c: [600,600,1000,1000,1500,1500]
 
 5 : 1*x5 + 1*x6 >= 400
 
-# Non negatività (solo quelle che servono per verificare se a 0)
+# Non neg
 6 : 1*x1 >= 0
 7 : 1*x2 >= 0
 8 : 1*x3 >= 0

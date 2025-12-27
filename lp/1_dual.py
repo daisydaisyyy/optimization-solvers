@@ -5,140 +5,128 @@ import os
 INPUT_FILE = "data.txt"
 OUTPUT_FILE = "dual.txt"
 
-def parse_primal(filename):
-    if not os.path.exists(filename):
-        raise FileNotFoundError(f"{filename} non trovato.")
+def format_num(val):
+    if abs(val - round(val)) < 1e-9: return str(int(round(val)))
+    return f"{val:.1f}"
 
-    with open(filename, 'r') as f:
-        lines = f.readlines()
+def parse_primal(filename):
+    if not os.path.exists(filename): raise FileNotFoundError("File not found")
+    with open(filename, 'r') as f: lines = f.readlines()
 
     c = []
-    constraints_data = [] 
-    max_var_index = 0
+    constrs = []
+    point = []
+    is_min = True
+    is_structural_section = True
     
-    mode = None
     for line in lines:
         line = line.strip()
-        if not line or line.startswith("#"): 
-            continue
-
-        if "target" in line: 
-            mode = "target"
-            continue
-        elif "[CONSTRAINTS]" in line: 
-            mode = "CONSTR"
-            continue
-
-        if mode == "target" and line.startswith("c:"):
-            clean_line = line.split(":")[1].replace('[','').replace(']','').replace(" ", "")
-            c = [float(x) for x in clean_line.split(",") if x]
-            
-        elif mode == "CONSTR":
-            if ":" in line and ("<=" in line or ">=" in line):
-                if "<=" in line: sep = "<="
-                else: sep = ">="
-                
-                rest = line.split(":")[1].strip()
-                lhs, rhs = rest.split(sep)
-                rhs_val = float(rhs)
-                                
-                terms_raw = lhs.replace("-", "+-").split("+")
-                row_dict = {} 
-                
-                for term in terms_raw:
-                    term = term.strip().replace(" ", "")
-                    if not term: continue
-                    
-                    coeff = 1.0
-                    var_idx = -1
-                    
-                    if '*' in term:
-                        parts = term.split('*')
-                        try:
-                            coeff = float(parts[0])
-                        except ValueError:
-                            continue
-                        part_var = parts[1]
-                    else:
-                        part_var = term
-                        if part_var.startswith("-"):
-                            coeff = -1.0
-                            part_var = part_var[1:]
-                    
-                    if 'x' in part_var:
-                        var_str = part_var.replace('x', '')
-                        if var_str.isdigit():
-                            var_idx = int(var_str) - 1
-                            if var_idx > max_var_index: max_var_index = var_idx
-                    
-                    if var_idx >= 0:
-                        row_dict[var_idx] = row_dict.get(var_idx, 0) + coeff
-                
-                constraints_data.append((row_dict, rhs_val))
-
-    n = max(len(c), max_var_index + 1)
-    m = len(constraints_data)
-    A = np.zeros((m, n))
-    b = np.zeros(m)
-    
-    for i, (row_dict, rhs) in enumerate(constraints_data):
-        b[i] = rhs
-        for col_idx, val in row_dict.items():
-            if col_idx < n:
-                A[i, col_idx] = val
-
-    return c, A, b
-
-def write_dual(c, A, b, output_file):
-    m, n = A.shape
-    with open(output_file, "w") as f:
-        f.write("target: \n")
-        # Scrive la funzione obiettivo Min (che usa i termini noti del primale)
-        obj_terms = []
-        for i, val in enumerate(b):
-            if abs(val) > 0:
-                obj_terms.append(f"{val:.0f}*y{i+1}")
-        f.write(f"min {' + '.join(obj_terms)}\n\n")
+        if not line: continue
         
-        f.write("[CONSTRAINTS]\n")
+        # non neg constraints
+        if line.startswith("#") and "non" in line.lower() and "neg" in line.lower():
+            is_structural_section = False
+            continue
+            
+        if line.startswith("#"): continue
+        
+        if "target" in line:
+            if "max" in line.lower(): is_min = False
+            elif "min" in line.lower(): is_min = True
+        
+        if line.startswith("c:"):
+            c = [float(x) for x in line.split(":")[1].strip(" []").split(",")]
+            
+        if "[POINT]" in line: pass
+        elif not any(k in line for k in ["target", "c:", "CONSTRAINTS", "B:"]) and "," in line:
+             try: point = [float(x) for x in line.split(',')]
+             except: pass
+
+        if ":" in line and any(x in line for x in ["=", "<=", ">="]):
+            if "target" in line: continue
+
+            # skip non-neg constraints
+            if not is_structural_section: continue
+
+            parts = line.split(":")
+            rest = parts[1]
+            sign = "="
+            if "<=" in rest: sign = "<="; lhs, rhs = rest.split("<=")
+            elif ">=" in rest: sign = ">="; lhs, rhs = rest.split(">=")
+            else: lhs, rhs = rest.split("=")
+            
+            row_map = {}
+            for t in lhs.replace("-", "+-").split("+"):
+                t = t.strip()
+                if not t: continue
+                coeff = 1.0
+                if "*" in t: 
+                    co, var = t.split("*")
+                    coeff = float(co.replace(" ", ""))
+                    idx = int(re.search(r'x(\d+)', var).group(1)) - 1
+                elif "x" in t:
+                    if t.startswith("-"): coeff = -1.0
+                    idx = int(re.search(r'x(\d+)', t).group(1)) - 1
+                row_map[idx] = row_map.get(idx, 0) + coeff
+            
+            constrs.append({
+                'A': row_map, 
+                'sign': sign, 
+                'b': float(rhs),
+                'is_structural': is_structural_section # every constraints except non neg ones
+            })
+
+    return c, constrs, point, is_min
+
+def write_dual(c, constrs, point, is_min, filename):
+    n = len(c)
+    m = len(constrs)
+    
+    with open(filename, "w") as f:
+        target = "max" if is_min else "min"
+        f.write(f"target: {target} ")
+        obj = []
+        for i, con in enumerate(constrs):
+            if con['b'] != 0: obj.append(f"{con['b']:g}*y{i+1}")
+        f.write(" + ".join(obj) + "\n\n[CONSTRAINTS]\n")
         
         for j in range(n):
             terms = []
-            for i in range(m):
-                val = A[i,j] 
-                if abs(val) > 1e-9:
-                    sign = "+" if val >= 0 else "-"
-                    abs_val = abs(val)
-                    var_name = f"y{i+1}"
-                    
-                    val_str = f"{abs_val:.2f}".rstrip('0').rstrip('.') if abs_val % 1 != 0 else f"{abs_val:.0f}"
-                    if val_str == "1": term_str = var_name
-                    else: term_str = f"{val_str}{var_name}"
+            for i, con in enumerate(constrs):
+                v = con['A'].get(j, 0)
+                if v != 0: terms.append(f"{v:g}y{i+1}")
+            
+            rel = "<=" if is_min else ">="
+            f.write(f"{' + '.join(terms)} {rel} {c[j]:g}\n")
+            
+        f.write("\n# Bounds\n")
+        for i, con in enumerate(constrs):
+            s = con['sign']
+            if is_min:
+                if s == "=": f.write(f"y{i+1} free\n")
+                elif s == ">=": f.write(f"y{i+1} >= 0\n")
+                elif s == "<=": f.write(f"y{i+1} <= 0\n")
+            else:
+                if s == "=": f.write(f"y{i+1} free\n")
+                elif s == "<=": f.write(f"y{i+1} >= 0\n")
+                elif s == ">=": f.write(f"y{i+1} <= 0\n")
 
-                    if not terms and val < 0: 
-                         terms.append(f"-{term_str}")
-                    elif not terms:
-                         terms.append(f"{term_str}")
-                    else:
-                         terms.append(f"{sign} {term_str}")
-        
-            slack_idx = m + j + 1
-            terms.append(f"- y{slack_idx}")
+    print(f"Dual saved to {filename}")
 
-            line_str = " ".join(terms)
+    if point:
+        vals = list(point)
+        for con in constrs:
+            lhs = sum(con['A'].get(i,0)*point[i] for i in range(len(point)))
             
-            rhs_c = c[j] if j < len(c) else 0.0
-            rhs_str = f"{rhs_c:.2f}".rstrip('0').rstrip('.') if rhs_c % 1 != 0 else f"{rhs_c:.0f}"
-            
-            f.write(f"{line_str} = {rhs_str}\n")
-            
-        f.write("\n# non neg\n")
-        f.write("y >= 0")
+            if con['is_structural'] and con['sign'] in [">=", "<="]: # consider only disequality constraints to find the solution y
+                 vals.append(lhs)
+                 
+        vec_str = "(" + ", ".join([format_num(v) for v in vals]) + ")"
+        print(f"solution using the starting point: y = {vec_str}")
 
 if __name__ == "__main__":
     try:
-        c, A, b = parse_primal(INPUT_FILE)
-        write_dual(c, A, b, OUTPUT_FILE)
-        print(f"SAVED in {OUTPUT_FILE}")
+        c, constrs, pt, is_min = parse_primal(INPUT_FILE)
+        write_dual(c, constrs, pt, is_min, OUTPUT_FILE)
     except Exception as e:
         print(f"Error: {e}")

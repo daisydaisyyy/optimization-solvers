@@ -22,12 +22,21 @@ def format_frac(val):
 def parse_input(data_filename):
     if not os.path.exists(data_filename):
         print("data.txt missing")
-        return None, None, None, None
+        return None, None, None, None, None
 
     with open(data_filename, 'r') as f:
         content = f.read()
 
-    # Parsing c vector
+    # choose between min or max problem
+    sense = GRB.MAXIMIZE # default
+    if re.search(r'target:.*min', content, re.IGNORECASE):
+        print(">>> Problem detected as MINIMIZATION")
+        sense = GRB.MINIMIZE
+    elif re.search(r'target:.*max', content, re.IGNORECASE):
+        print(">>> Problem detected as MAXIMIZATION")
+        sense = GRB.MAXIMIZE
+
+    # parsing c vector
     c_match = re.search(r'c:\s*\[(.*?)\]', content)
     c = np.array([float(x.strip()) for x in c_match.group(1).split(',')])
     n_vars = len(c)
@@ -63,15 +72,19 @@ def parse_input(data_filename):
                     coeff = float(c_str.replace(' ', ''))
                     var_idx = int(re.search(r'x(\d+)', v_s).group(1)) - 1
                     row[var_idx] += coeff
+                elif 'x' in term:
+                    coeff = -1.0 if term.startswith('-') else 1.0
+                    var_idx = int(re.search(r'x(\d+)', term).group(1)) - 1
+                    row[var_idx] += coeff
             
             A_rows.append(row)
             b_vec.append(rhs)
             signs.append(sign)
 
     print(f"Parsed {n_vars} variables, {len(b_vec)} constraints.")
-    return np.array(A_rows), np.array(b_vec), signs, c
+    return np.array(A_rows), np.array(b_vec), signs, c, sense
 
-def solve_gomory(A, b, signs, c):
+def solve_gomory(A, b, signs, c, sense):
     m, n = A.shape
     
     # A MATRIX
@@ -111,14 +124,16 @@ def solve_gomory(A, b, signs, c):
     x = model.addVars(n, lb=0, vtype=GRB.CONTINUOUS, name="x")
     s = model.addVars(m, lb=0, vtype=GRB.CONTINUOUS, name="s") 
     
-    model.setObjective(quicksum(c[i] * x[i] for i in range(n)), GRB.MAXIMIZE)
+    model.setObjective(quicksum(c[i] * x[i] for i in range(n)), sense) # set target, sense = direction = min or max problem
     
     for i in range(m):
         expr = quicksum(A[i, j] * x[j] for j in range(n))
         if signs[i] == '<=':
             model.addConstr(expr + s[i] == b[i], name=f"c{i}")
-        else: 
+        elif signs[i] == '>=':
             model.addConstr(expr - s[i] == b[i], name=f"c{i}")
+        else: 
+            model.addConstr(expr == b[i], name=f"c{i}")
 
     model.optimize()
     
@@ -150,11 +165,12 @@ def solve_gomory(A, b, signs, c):
     # A_total = [A | S]
     S_mat = np.zeros((m, m))
     for i, sign in enumerate(signs):
-        S_mat[i, i] = 1.0 if sign == '<=' else -1.0
+        if sign == '<=': S_mat[i, i] = 1.0
+        elif sign == '>=': S_mat[i, i] = -1.0
         
     A_total = np.hstack([A, S_mat])
     
-    # Identify Non-Basic Indices
+    # non-Basic indices
     non_basis_idxs = [i for i in range(A_total.shape[1]) if i not in basis_idxs]
     non_basis_names = [names_list[i] for i in non_basis_idxs]
 
@@ -308,14 +324,16 @@ def solve_gomory(A, b, signs, c):
     model_int.Params.OutputFlag = 0
     xi = model_int.addVars(n, lb=0, vtype=GRB.INTEGER, name="x")
     
-    model_int.setObjective(quicksum(c[i] * xi[i] for i in range(n)), GRB.MAXIMIZE)
+    model_int.setObjective(quicksum(c[i] * xi[i] for i in range(n)), sense)
     
     for i in range(m):
         expr = quicksum(A[i, j] * xi[j] for j in range(n))
         if signs[i] == '<=':
             model_int.addConstr(expr <= b[i])
-        else: 
+        elif signs[i] == '>=':
             model_int.addConstr(expr >= b[i])
+        else: 
+            model_int.addConstr(expr == b[i])
 
     model_int.optimize()
     
@@ -331,6 +349,6 @@ def solve_gomory(A, b, signs, c):
         print("integer solution not found.")
 
 if __name__ == "__main__":
-    A, b, signs, c = parse_input(INPUT_FILE)
+    A, b, signs, c, sense = parse_input(INPUT_FILE)
     if A is not None:
-        solve_gomory(A, b, signs, c)
+        solve_gomory(A, b, signs, c, sense)
