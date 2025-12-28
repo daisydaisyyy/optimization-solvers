@@ -126,6 +126,7 @@ class AssignmentSolver:
         self.print_matrix(curr_matrix, "FULLY REDUCED (row + column subtraction)")
 
         # solve assignment using scipy
+        # you can also do it by hand by choosing for each node the min edge (with the assignment constraint that every node must have only 1 entering edge)
         original_matrix = np.zeros((self.num_nodes, self.num_nodes))
         for i in range(self.num_nodes):
             for j in range(self.num_nodes):
