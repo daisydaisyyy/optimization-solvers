@@ -9,7 +9,6 @@ INPUT_FILE = "data.txt"
 
 def get_fractional_part(val):
     tol = 1e-9
-    # if it's integer (within tolerance), fractional part = 0
     if abs(val - round(val)) < tol: 
         return 0.0
     return val - math.floor(val + tol)
@@ -27,8 +26,7 @@ def parse_input(data_filename):
     with open(data_filename, 'r') as f:
         content = f.read()
 
-    # choose between min or max problem
-    sense = GRB.MAXIMIZE # default
+    sense = GRB.MAXIMIZE 
     if re.search(r'target:.*min', content, re.IGNORECASE):
         print(">>> Problem detected as MINIMIZATION")
         sense = GRB.MINIMIZE
@@ -36,7 +34,6 @@ def parse_input(data_filename):
         print(">>> Problem detected as MAXIMIZATION")
         sense = GRB.MAXIMIZE
 
-    # parsing c vector
     c_match = re.search(r'c:\s*\[(.*?)\]', content)
     c = np.array([float(x.strip()) for x in c_match.group(1).split(',')])
     n_vars = len(c)
@@ -52,7 +49,7 @@ def parse_input(data_filename):
         if 'B:' in line: 
             parsing = False; break
         if not parsing or not line or line.startswith('#'): continue
-        if re.search(r'1\*\s*x\d+\s*[<>]=\s*0', line): continue 
+        # if re.search(r'1\*\s*x\d+\s*[<>]=\s*0', line): continue 
             
         if ':' in line and ('<=' in line or '>=' in line or '=' in line):
             if '<=' in line: sign, parts = '<=', line.split('<=')
@@ -87,13 +84,11 @@ def parse_input(data_filename):
 def solve_gomory(A, b, signs, c, sense):
     m, n = A.shape
     
-    # A MATRIX
     print("\n--- A ---")
     for i in range(m):
         row_str = "  ".join([f"{x:6.2f}" for x in A[i]])
         print(f"Row {i+1}: [ {row_str} ]  {signs[i]} {b[i]}")
 
-    # PRINT SYSTEM + SLACK VARS
     print("\n--- SYSTEM + SLACK VARS ---")
     for i in range(m):
         terms_str = []
@@ -106,7 +101,6 @@ def solve_gomory(A, b, signs, c, sense):
                 term = f"{sign} {val_str}x{j+1}"
                 terms_str.append(term)
         
-        # slack vars
         s_name = f"s{i+1}"
         if signs[i] == '<=':
             terms_str.append(f"+ {s_name}")
@@ -118,13 +112,12 @@ def solve_gomory(A, b, signs, c, sense):
             
         print(f"{full_line} = {b[i]:g}")
     
-    # solve relaxed problem (LP OPTIMAL SOLUTION)
     model = Model("lp")
     model.Params.OutputFlag = 0
     x = model.addVars(n, lb=0, vtype=GRB.CONTINUOUS, name="x")
     s = model.addVars(m, lb=0, vtype=GRB.CONTINUOUS, name="s") 
     
-    model.setObjective(quicksum(c[i] * x[i] for i in range(n)), sense) # set target, sense = direction = min or max problem
+    model.setObjective(quicksum(c[i] * x[i] for i in range(n)), sense) 
     
     for i in range(m):
         expr = quicksum(A[i, j] * x[j] for j in range(n))
@@ -146,23 +139,20 @@ def solve_gomory(A, b, signs, c, sense):
     names_list = [f"x{i+1}" for i in range(n)] + [f"s{i+1}" for i in range(m)]
     vars_gurobi = [x[i] for i in range(n)] + [s[i] for i in range(m)]
     
-    # print only non-zero variables
     for i, var in enumerate(vars_gurobi):
         val = var.X
         if abs(val) > 1e-4:
             print(f"  {names_list[i]:<4}: {val:8.4f}")
 
-    # find B
     basis_idxs = []
-    basis_print = [] # to print 1-based idxs
+    basis_print = [] 
     for idx, var in enumerate(vars_gurobi):
-        if var.VBasis == 0: # in B
+        if var.VBasis == 0: 
             basis_idxs.append(idx)
             basis_print.append(idx+1)
     basis_names = [names_list[i] for i in basis_idxs]
     print(f"\nB: {basis_print} (vars: {basis_names})")
 
-    # A_total = [A | S]
     S_mat = np.zeros((m, m))
     for i, sign in enumerate(signs):
         if sign == '<=': S_mat[i, i] = 1.0
@@ -170,21 +160,17 @@ def solve_gomory(A, b, signs, c, sense):
         
     A_total = np.hstack([A, S_mat])
     
-    # non-Basic indices
     non_basis_idxs = [i for i in range(A_total.shape[1]) if i not in basis_idxs]
     non_basis_names = [names_list[i] for i in non_basis_idxs]
 
-    # --- A_B, A_N ---
     try:
         B_mat = A_total[:, basis_idxs]
         
-        # PRINT A_B
         print("\n--- A_B ---")
         for i in range(m):
             row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in B_mat[i, :]]
             print(f"  Row {i+1}: " + "  ".join(row_vals))
         
-        # PRINT A_N
         if non_basis_idxs:
             A_N = A_total[:, non_basis_idxs]
             print("\n--- A_N ---")
@@ -203,13 +189,11 @@ def solve_gomory(A, b, signs, c, sense):
         print("Base matrix inversion error:", e)
         return
 
-    # --- A_B^-1 ---
     print("\n--- A_B^-1 ---")
     for i in range(m):
         row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in B_inv[i, :]]
         print(f"  Row {i+1}: " + "  ".join(row_vals))
 
-    # --- Atilde = A_B^-1 * A_N ---
     if A_N is not None:
         A_tilde = B_inv @ A_N
         
@@ -221,7 +205,6 @@ def solve_gomory(A, b, signs, c, sense):
 
     x_B_val = B_inv @ b
     
-    # --- find fractional parts that will generate a cut ---
     print("\n--- FRACTIONAL ROWS ---")
     fractional_rows = []
     
@@ -238,6 +221,8 @@ def solve_gomory(A, b, signs, c, sense):
 
     print("\n--- GOMORY CUTS ---")
     
+    generated_cuts = []
+
     if not fractional_rows:
         print("No fractional rows found.")
     else:
@@ -248,7 +233,6 @@ def solve_gomory(A, b, signs, c, sense):
             
             print(f"\n>>> ROW {current_row_num} ({var_name})")
             
-            # B_inv row (= pi)
             row_B_inv = B_inv[row_idx, :]
             
             print(f"    [Step 1] row {current_row_num} of B^-1:")
@@ -303,12 +287,17 @@ def solve_gomory(A, b, signs, c, sense):
                 print("    No cut generated (integer coefficients).")
                 continue
 
-            # 3. Final Cut
+            generated_cuts.append({
+                'id': current_row_num,
+                'var': var_name,
+                'lhs': cut_lhs_terms,
+                'rhs': f0
+            })
+
             frac_cut_str = " + ".join([f"{{{format_frac(c)}}}{v}" for c, v in cut_lhs_terms])
             print(f"\n    => CUT:")
             print(f"    {frac_cut_str} >= {format_frac(f0)}") 
             
-            # integer cut (x8 heuristic)
             common_mult = 8
             int_terms = []
             for fj, vname in cut_lhs_terms:
@@ -319,7 +308,6 @@ def solve_gomory(A, b, signs, c, sense):
 
     print("-" * 40)
     
-    # --- INTEGER SOLUTION ---
     model_int = Model("gomory_int")
     model_int.Params.OutputFlag = 0
     xi = model_int.addVars(n, lb=0, vtype=GRB.INTEGER, name="x")
@@ -337,6 +325,7 @@ def solve_gomory(A, b, signs, c, sense):
 
     model_int.optimize()
     
+    obj_int = None
     if model_int.status == GRB.OPTIMAL:
         sol_int = np.array([xi[i].X for i in range(n)])
         obj_int = model_int.ObjVal
@@ -347,6 +336,39 @@ def solve_gomory(A, b, signs, c, sense):
         print(f"optimal integer solution: {sol_int_rounded}")
     else:
         print("integer solution not found.")
+
+    # choose a cut and add it to the problem, then check if we obtain the optimal solution of the integer problem
+    if generated_cuts and obj_int is not None:
+        print("\nWhich cut do you want to use?")
+        for i, cut_data in enumerate(generated_cuts):
+             print(f"{i+1}: Cut from Row {cut_data['id']} ({cut_data['var']})")
+        
+        try:
+            choice = int(input("Enter number: "))
+            if 1 <= choice <= len(generated_cuts):
+                selected_cut = generated_cuts[choice - 1]
+                
+                name_to_var = {name: var for name, var in zip(names_list, vars_gurobi)}
+                
+                cut_expr = quicksum(coeff * name_to_var[vname] for coeff, vname in selected_cut['lhs'])
+                model.addConstr(cut_expr >= selected_cut['rhs'], name="user_cut")
+                
+                model.optimize()
+                
+                if model.status == GRB.OPTIMAL:
+                    new_opt = model.ObjVal
+                    print(f"New relaxed optimum: {new_opt:.4f}")
+                    
+                    if abs(new_opt - obj_int) < 1e-4:
+                        print("Is it the optimal solution of the ILP? YES")
+                    else:
+                        print("Is it the optimal solution of the ILP? NO")
+                else:
+                    print("Relaxed problem became infeasible.")
+            else:
+                print("Invalid selection.")
+        except ValueError:
+            print("Invalid input.")
 
 if __name__ == "__main__":
     A, b, signs, c, sense = parse_input(INPUT_FILE)

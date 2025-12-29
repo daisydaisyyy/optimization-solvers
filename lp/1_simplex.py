@@ -2,7 +2,6 @@ import numpy as np
 import re
 import os
 from fractions import Fraction
-import sys
 
 INPUT_FILE = "data.txt"
 OUTPUT_FILE = "sim_result.txt"
@@ -58,7 +57,6 @@ def parse_input(filename):
         line = line.strip()
         if not line or line.startswith("#"): continue
         
-        # Rilevamento direzione problema (Min/Max)
         if "target" in line and "min" in line.lower():
             is_min = True
 
@@ -117,7 +115,7 @@ def parse_input(filename):
                 except Exception as e: 
                     print(f"Parsing error on row {con_id}: {e}")
 
-    # Correzione per minimizzazione: Invertiamo C
+    # change thee sign of c for minimization problems
     if is_min and c_vec is not None:
         print(">>> Minimization detected: Flipping c vector sign.")
         c_vec = -c_vec
@@ -159,8 +157,8 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         return None, None, True
 
     idx_h = neg_indices[0] 
-    for i in neg_indices:
-         if y_vals[i] < y_vals[idx_h]: idx_h = i
+    # for i in neg_indices:
+    #      if y_vals[i] < y_vals[idx_h]: idx_h = i
 
     h_id = basis_ids[idx_h] 
     val_leaving = y_vals[idx_h]
@@ -187,23 +185,14 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         slack = con['b'] - np.dot(con['A'], x_curr)
         den = np.dot(con['A'], w_vec)
         
-        # skip if value ~ 0 or moving away from boundary wrongly
-        if den > -1e-9: # Moving towards boundary means den < 0 in standard Ax <= b? 
-            # Actually with Ax <= b, slack = b - Ax.
-            # x_new = x + r*w.
-            # New slack = b - A(x + rw) = slack - r * (Aw).
-            # To stay feasible (slack >= 0), if Aw > 0, we are safe. 
-            # If Aw < 0, slack decreases. We hit boundary when slack - r(Aw) = 0 => r = slack / Aw.
-            # But the logic here depends on sign conventions.
-            # Let's trust the logic: den != 0 check
-            pass
+        # ignore constraints not limiting the step
+        if den <= 1e-9:
+            continue
 
         if abs(den) < 1e-9: continue
         
-        # Check simple ratio test logic from previous robust version
         r_val = slack / den
         
-        # Only positive steps matter usually, depending on direction
         if r_val < -1e-9: continue 
 
         r_str = format_fraction(r_val)
