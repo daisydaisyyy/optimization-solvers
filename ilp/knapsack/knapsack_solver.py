@@ -135,7 +135,6 @@ class TreeVisualizer:
             if new_optimum_found:
                 print(f"{indent}    *** NEW OPTIMUM FOUND: v_I updated to {int(self.best_value)} ***")
 
-            # --- PRUNING ---
             if bound_floor < self.best_value:
                  print(f"{indent}    -> ACTION: PRUNING: {bound_floor} < {int(self.best_value)}")
                  continue
@@ -147,7 +146,6 @@ class TreeVisualizer:
             if curr_node.is_integer:
                 continue 
 
-            # --- BRANCHING ---
             print(f"{indent}    -> ACTION: BRANCHING on x{curr_node.split_item}")
             
             children = []
@@ -164,9 +162,8 @@ class TreeVisualizer:
                 for k, v in child_0_data.items(): setattr(node_0, k, v)
                 children.append(node_0)
             
-            # LIFO stack
-            if node_1: stack.append(node_1) # (processed last)
-            if node_0: stack.append(node_0) # (processed first)
+            if node_1: stack.append(node_1)
+            if node_0: stack.append(node_0)
 
         return self.best_value
 
@@ -195,8 +192,6 @@ class KnapsackProblem:
 class GomoryKnapsackInteger:
     def __init__(self, capacity, items):
         self.capacity = capacity
-        # for the unbounded case, we can pick the same item multiple times
-        # continuous relaxation fills the knapsack with the item having the best ratio
         self.items = [i.copy() for i in items]
         for item in self.items:
             item['r'] = item['v'] / item['p']
@@ -205,8 +200,6 @@ class GomoryKnapsackInteger:
         self.items_by_id = sorted(self.items, key=lambda x: x['id'])
 
     def solve_and_generate_cut(self):
-
-        # find basis variable (item with max ratio)
         best_item = self.items_sorted[0]
         base_id = best_item['id']
         base_w = best_item['p']
@@ -214,7 +207,6 @@ class GomoryKnapsackInteger:
         
         print(f"Most efficient item (Basis): Item {base_id} (v={base_v}, p={base_w}, r={best_item['r']:.4f})")
         
-        # relaxed solution
         val_x_base = self.capacity / base_w
         opt_relaxed_val = val_x_base * base_v
         
@@ -226,7 +218,6 @@ class GomoryKnapsackInteger:
         
         print(f"v_S(P) (Relaxed Value) = {opt_relaxed_val:.2f}")
         
-        # calculate feasible int solution
         qty_int = math.floor(val_x_base)
         opt_int_val = qty_int * base_v
         rem_cap = self.capacity - (qty_int * base_w)
@@ -236,7 +227,6 @@ class GomoryKnapsackInteger:
         print(f"Remaining capacity: {rem_cap}")
         print(f"v_I(P) (Integer Basis Value) = {opt_int_val}")
         
-        # gomory cut
         print(f"\n--- GOMORY CUT GENERATION ---")
         print(f"Optimal row equation (Basis x{base_id}):")
         
@@ -247,7 +237,6 @@ class GomoryKnapsackInteger:
         
         cut_terms = []
         
-        # variables not in B
         print("Calculating fractional coefficients (f_j):")
         for item in self.items_by_id:
             if item['id'] == base_id:
@@ -261,7 +250,6 @@ class GomoryKnapsackInteger:
             if fj > 0:
                 cut_terms.append((fj, f"x{item['id']}"))
                 
-        # Slack variable (s)
         coeff_s = Fraction(1, int(base_w))
         fs = coeff_s - math.floor(coeff_s)
         slack_name = f"x{len(self.items)+1}" 
@@ -285,8 +273,6 @@ class GomoryKnapsackInteger:
         cut_str_int = " + ".join(cut_int_terms)
         print(f"{cut_str_int} >= {rhs_int}")
 
-# --- MAIN ---
-
 def load_data(filename):
     items = []
     capacity = 0
@@ -309,13 +295,39 @@ def load_data(filename):
         sys.exit(1)
     return capacity, items
 
+def check_coincidence(items):
+    print("EXAMPLE WHERE BINARY OPTIMUM == INTEGER OPTIMUM?")
+    
+    best_item = max(items, key=lambda x: x['v']/x['p'])
+    test_cap = int(best_item['p'])
+
+    print(f"Using capacity = weight of most efficient Item {best_item['id']}: {test_cap}")
+    
+    print(f"\n1) Binary Case (Capacity {test_cap}):")
+    kp_bin = KnapsackProblem(test_cap, items)
+    val_greedy, _ = kp_bin.solve_binary_greedy()
+    solver_bin = TreeVisualizer(test_cap, items)
+    solver_bin.solve(initial_best_value=val_greedy)
+    bin_opt = solver_bin.best_value
+    print(f">>> Binary opt: {int(bin_opt)}")
+    
+    print(f"\n2) Integer Case (Capacity {test_cap}):")
+    int_opt = best_item['v']
+    print(f"Item {best_item['id']} has max efficiency.")
+    print(f"With capacity {test_cap}, we can fit exactly 1 unit.")
+    print(f">>> Integer Optimum: {int(int_opt)}")
+    
+    if bin_opt == int_opt:
+        print("\nOK, Solutions coincide.")
+    else:
+        print("\nNot equal.")
+
 def main():
     filename = 'knapsack.txt'
     if len(sys.argv) > 1: filename = sys.argv[1]
     
     capacity, items = load_data(filename)
     
-    # Pre-processing Section
     kp_bin = KnapsackProblem(capacity, items)
     
     print(">>> Item Details (v, p, ratio):")
@@ -325,6 +337,7 @@ def main():
         ratio_float = item['r']
         print(f"    Item {item['id']}: v={v_int}, p={p_int}, r={ratio_float:.2f}")
 
+    print("\n=== 1. PRE-PROCESSING ===")
     
     lower_value_bin, greedy_sol_bin = kp_bin.solve_binary_greedy()
     print(f"Lower Bound (Greedy) v_I = {int(lower_value_bin)}")
@@ -332,12 +345,18 @@ def main():
     upper_exact_bin, upper_floor_bin, rel_sol_bin = kp_bin.solve_bin_rel()
     print(f"Upper Bound (Relax) v_S = {upper_exact_bin:.2f}")
 
-    # 1. solve binary knapsack
+    print("\n" + "="*50)
+    print(f"BINARY CASE (Capacity {capacity})")
+    print("="*50)
+    
     solver_bin = TreeVisualizer(capacity, items)
     solver_bin.solve(initial_best_value=lower_value_bin)
-    print(f"\n>>> Binary opt found: {int(solver_bin.best_value)}")
+    print(f"\n>>> Binary Optimum found: {int(solver_bin.best_value)}")
     
-    # 2. ask for custom capacity input used to solve the integer problem
+    print("\n" + "="*50)
+    print("INTEGER PROBLEM, GOMORY CUT")
+    print("="*50)
+    
     try:
         user_cap_str = input("Enter capacity for integer case: ").strip()
         capacity_int = int(user_cap_str) if user_cap_str else int(capacity)
@@ -345,9 +364,10 @@ def main():
         print(f"Invalid input, using {capacity}.")
         capacity_int = int(capacity)
 
-    # 3. solve Gomory
     gomory_solver = GomoryKnapsackInteger(capacity_int, items)
     gomory_solver.solve_and_generate_cut()
+
+    check_coincidence(items)
 
 if __name__ == "__main__":
     main()
