@@ -1,16 +1,15 @@
 import sys
 import math
 import numpy as np 
-from scipy.optimize import milp, LinearConstraint, Bounds 
 from fractions import Fraction
+import os
 
 class Node:
     def __init__(self, level, taken, path_desc):
         self.level = level                  
-        self.taken = taken                  # Lista completa delle decisioni prese [(id, val), ...]
-        self.path_desc = path_desc          # Descrizione ultima mossa (non usato per la stampa full)
+        self.taken = taken               
+        self.path_desc = path_desc 
         
-        # Dati del nodo
         self.sol_vector = {}
         self.curr_weight = 0.0
         self.curr_value = 0.0
@@ -21,11 +20,12 @@ class Node:
 class TreeVisualizer:
     def __init__(self, capacity, items):
         self.capacity = capacity
-        for item in items:
+        self.items = [i.copy() for i in items]
+        for item in self.items:
             item['r'] = item['v'] / item['p']
         
-        self.items_sorted = sorted(items, key=lambda x: x['r'], reverse=True)
-        self.items_by_id = sorted(items, key=lambda x: x['id'])
+        self.items_sorted = sorted(self.items, key=lambda x: x['r'], reverse=True)
+        self.items_by_id = sorted(self.items, key=lambda x: x['id'])
         self.best_value = 0
         self.node_counter = 0 
 
@@ -85,6 +85,7 @@ class TreeVisualizer:
         }
 
     def solve(self, initial_best_value=0):
+        print(f"\n--- STARTING BRANCH & BOUND (Capacity {self.capacity}, Binary Case) ---")
         self.best_value = initial_best_value
         
         root_data = self.precalc_node([])
@@ -93,7 +94,6 @@ class TreeVisualizer:
             for k, v in root_data.items(): setattr(root, k, v)
         
         stack = [root]
-        
         
         while stack:
             curr_node = stack.pop()
@@ -164,15 +164,12 @@ class TreeVisualizer:
                 for k, v in child_0_data.items(): setattr(node_0, k, v)
                 children.append(node_0)
             
-            # LIFO stack to pop best value first
-            children.sort(key=lambda n: (n.is_integer, n.curr_value), reverse=False)
-            
-            for child in children:
-                stack.append(child)
+            # LIFO stack
+            if node_1: stack.append(node_1) # (processed last)
+            if node_0: stack.append(node_0) # (processed first)
 
         return self.best_value
 
-# --- CLASSI SUPPORTO ---
 class KnapsackProblem:
     def __init__(self, capacity, items):
         self.capacity = capacity
@@ -181,17 +178,13 @@ class KnapsackProblem:
         self.items_sorted = sorted(self.items, key=lambda x: x['r'], reverse=True)
         self.items_original_order = sorted(self.items, key=lambda x: x['id'])
     
-    def _format_vector(self, solution_dict):
-        vector = []
-        for item in self.items_original_order:
-            value = solution_dict.get(item['id'], 0)
-            if isinstance(value, Fraction):
-                val = float(value)
-                vector.append("1" if val==1.0 else "0" if val==0.0 else f"{value.numerator}/{value.denominator}")
-            else:
-                vector.append(str(int(value)) if value == int(value) else f"{value:.2f}")
-        return f"( {', '.join(vector)} )"
-
+    def solve_binary_greedy(self):
+        remaining_w = self.capacity; total_value = 0; solution = {}
+        for item in self.items_sorted:
+            if item['p'] <= remaining_w: remaining_w -= item['p']; total_value += item['v']; solution[item['id']] = 1
+            else: solution[item['id']] = 0
+        return total_value, solution
+    
     def solve_bin_rel(self):
         rem_w = self.capacity; total_value = 0; solution = {}
         for item in self.items_sorted:
@@ -199,15 +192,104 @@ class KnapsackProblem:
             else: fraction = Fraction(int(rem_w), int(item['p'])); total_value += float(fraction) * item['v']; solution[item['id']] = fraction; rem_w = 0; break
         return total_value, math.floor(total_value), solution
 
-    def solve_binary_greedy(self):
-        remaining_w = self.capacity; total_value = 0; solution = {}
-        for item in self.items_sorted:
-            if item['p'] <= remaining_w: remaining_w -= item['p']; total_value += item['v']; solution[item['id']] = 1
-            else: solution[item['id']] = 0
-        return total_value, solution
+class GomoryKnapsackInteger:
+    def __init__(self, capacity, items):
+        self.capacity = capacity
+        # for the unbounded case, we can pick the same item multiple times
+        # continuous relaxation fills the knapsack with the item having the best ratio
+        self.items = [i.copy() for i in items]
+        for item in self.items:
+            item['r'] = item['v'] / item['p']
+        
+        self.items_sorted = sorted(self.items, key=lambda x: x['r'], reverse=True)
+        self.items_by_id = sorted(self.items, key=lambda x: x['id'])
+
+    def solve_and_generate_cut(self):
+
+        # find basis variable (item with max ratio)
+        best_item = self.items_sorted[0]
+        base_id = best_item['id']
+        base_w = best_item['p']
+        base_v = best_item['v']
+        
+        print(f"Most efficient item (Basis): Item {base_id} (v={base_v}, p={base_w}, r={best_item['r']:.4f})")
+        
+        # relaxed solution
+        val_x_base = self.capacity / base_w
+        opt_relaxed_val = val_x_base * base_v
+        
+        print(f"\n--- RELAXED SOLUTION ---")
+        print(f"x{base_id} = {self.capacity} / {base_w} = {val_x_base:.2f}")
+        for item in self.items_by_id:
+            if item['id'] != base_id:
+                print(f"x{item['id']} = 0")
+        
+        print(f"v_S(P) (Relaxed Value) = {opt_relaxed_val:.2f}")
+        
+        # calculate feasible int solution
+        qty_int = math.floor(val_x_base)
+        opt_int_val = qty_int * base_v
+        rem_cap = self.capacity - (qty_int * base_w)
+        
+        print(f"\n--- FEASIBLE SOLUTION (Lower Bound) ---")
+        print(f"x{base_id} = {qty_int} (integers)")
+        print(f"Remaining capacity: {rem_cap}")
+        print(f"v_I(P) (Integer Basis Value) = {opt_int_val}")
+        
+        # gomory cut
+        print(f"\n--- GOMORY CUT GENERATION ---")
+        print(f"Optimal row equation (Basis x{base_id}):")
+        
+        rhs_frac = Fraction(int(self.capacity), int(base_w))
+        f0 = rhs_frac - math.floor(rhs_frac)
+        
+        print(f"RHS = {self.capacity}/{base_w} = {float(rhs_frac):.2f} -> f0 = {f0}")
+        
+        cut_terms = []
+        
+        # variables not in B
+        print("Calculating fractional coefficients (f_j):")
+        for item in self.items_by_id:
+            if item['id'] == base_id:
+                continue
+            
+            coeff = Fraction(int(item['p']), int(base_w))
+            fj = coeff - math.floor(coeff)
+            
+            print(f"  x{item['id']}: w={item['p']} -> coeff={coeff} -> f_{item['id']} = {fj}")
+            
+            if fj > 0:
+                cut_terms.append((fj, f"x{item['id']}"))
+                
+        # Slack variable (s)
+        coeff_s = Fraction(1, int(base_w))
+        fs = coeff_s - math.floor(coeff_s)
+        slack_name = f"x{len(self.items)+1}" 
+        print(f"  {slack_name} (slack): coeff={coeff_s} -> f_s = {fs}")
+        
+        if fs > 0:
+            cut_terms.append((fs, slack_name))
+            
+        cut_str_frac = " + ".join([f"{val} {name}" for val, name in cut_terms])
+        print(f"\nFractional Cut:\n{cut_str_frac} >= {f0}")
+        
+        print(f"\nInteger Cut (multiplied by {int(base_w)}):")
+        
+        cut_int_terms = []
+        for val, name in cut_terms:
+            int_val = int(val * base_w) 
+            cut_int_terms.append(f"{int_val}{name}")
+            
+        rhs_int = int(f0 * base_w)
+        
+        cut_str_int = " + ".join(cut_int_terms)
+        print(f"{cut_str_int} >= {rhs_int}")
+
+# --- MAIN ---
 
 def load_data(filename):
-    items = []; capacity = 0
+    items = []
+    capacity = 0
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
@@ -216,33 +298,56 @@ def load_data(filename):
                 parts = line.strip().split()
                 if not parts: continue
                 if parts[0] == "CAPACITY": capacity = float(parts[1])
-                elif parts[0] == "ITEM": items.append({'id': counter, 'v': float(parts[1]), 'p': float(parts[2])}); counter += 1
-                elif len(parts) == 2 and parts[0].replace('.', '', 1).isdigit(): items.append({'id': counter, 'v': float(parts[0]), 'p': float(parts[1])}); counter += 1
-    except FileNotFoundError: print(f"File {filename} not found"); sys.exit(1)
+                elif parts[0] == "ITEM":
+                    items.append({'id': counter, 'v': float(parts[1]), 'p': float(parts[2])})
+                    counter += 1
+                elif len(parts) == 2 and parts[0].replace('.', '', 1).isdigit():
+                    items.append({'id': counter, 'v': float(parts[0]), 'p': float(parts[1])})
+                    counter += 1
+    except FileNotFoundError:
+        print(f"File {filename} not found")
+        sys.exit(1)
     return capacity, items
 
 def main():
     filename = 'knapsack.txt'
     if len(sys.argv) > 1: filename = sys.argv[1]
+    
     capacity, items = load_data(filename)
-    kp = KnapsackProblem(capacity, items)
+    
+    # Pre-processing Section
+    kp_bin = KnapsackProblem(capacity, items)
     
     print(">>> Item Details (v, p, ratio):")
-    for item in kp.items_sorted:
-        print(f"    Item {item['id']}: v={int(item['v'])}, p={int(item['p'])}, r={item['r']:.2f}")
+    for item in kp_bin.items_sorted:
+        v_int = int(item['v'])
+        p_int = int(item['p'])
+        ratio_float = item['r']
+        print(f"    Item {item['id']}: v={v_int}, p={p_int}, r={ratio_float:.2f}")
 
-    print("\n=== 1. PRE-PROCESSING ===")
-    lower_value_bin, greedy_sol_bin = kp.solve_binary_greedy()
-    print(f"Lower Bound (Greedy) v_I = {int(lower_value_bin)}")
-    upper_exact, upper_floor, sol_rel = kp.solve_bin_rel()
-    print(f"Upper Bound (Relax) v_S = {upper_exact:.2f}")
-
-    print("\n=== 2. BRANCH AND BOUND ===")
-    solver = TreeVisualizer(capacity, items)
-    solver.solve(initial_best_value=lower_value_bin)
     
-    print("\n=== OPTIMAL RESULT ===")
-    print(f"   Value = {int(solver.best_value)}")
+    lower_value_bin, greedy_sol_bin = kp_bin.solve_binary_greedy()
+    print(f"Lower Bound (Greedy) v_I = {int(lower_value_bin)}")
+    
+    upper_exact_bin, upper_floor_bin, rel_sol_bin = kp_bin.solve_bin_rel()
+    print(f"Upper Bound (Relax) v_S = {upper_exact_bin:.2f}")
+
+    # 1. solve binary knapsack
+    solver_bin = TreeVisualizer(capacity, items)
+    solver_bin.solve(initial_best_value=lower_value_bin)
+    print(f"\n>>> Binary opt found: {int(solver_bin.best_value)}")
+    
+    # 2. ask for custom capacity input used to solve the integer problem
+    try:
+        user_cap_str = input("Enter capacity for integer case: ").strip()
+        capacity_int = int(user_cap_str) if user_cap_str else int(capacity)
+    except ValueError:
+        print(f"Invalid input, using {capacity}.")
+        capacity_int = int(capacity)
+
+    # 3. solve Gomory
+    gomory_solver = GomoryKnapsackInteger(capacity_int, items)
+    gomory_solver.solve_and_generate_cut()
 
 if __name__ == "__main__":
     main()
