@@ -44,13 +44,22 @@ def parse_input(data_filename):
     
     for line in lines:
         line = line.strip()
+        
         if '[CONSTRAINTS]' in line or '[VINCOLI]' in line: 
-            parsing = True; continue
-        if 'B:' in line: 
-            parsing = False; break
-        if not parsing or not line or line.startswith('#'): continue
-        # if re.search(r'1\*\s*x\d+\s*[<>]=\s*0', line): continue 
+            parsing = True
+            continue
             
+        if 'B:' in line: 
+            parsing = False
+            break
+
+        if "Non neg" in line or "non neg" in line.lower():
+            parsing = False
+            continue
+      
+        if not parsing or not line or line.startswith('#'): 
+            continue
+
         if ':' in line and ('<=' in line or '>=' in line or '=' in line):
             if '<=' in line: sign, parts = '<=', line.split('<=')
             elif '>=' in line: sign, parts = '>=', line.split('>=')

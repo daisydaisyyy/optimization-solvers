@@ -143,12 +143,16 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         log("Error: Singular matrix.")
         return None, None, True
 
+
+    log("\n--- Find hv (leaving index = min of y_i (from dual solution) ) ---")
+    for i, bid in enumerate(basis_ids):
+        val = y_vals[i]
+        status = " -> FOUND" if val < -1e-7 else " (OK)"
+        log(f"  {bid}: {format_fraction(val):>6} {status}")
     y_full_map = {}
     for idx, bid in enumerate(basis_ids):
         y_full_map[bid] = y_vals[idx]
     
-    y_str_frac = "(" + ", ".join([format_fraction(y_vals[i]) for i in range(len(y_vals))]) + ")"
-    log(f"Dual values in B: {y_str_frac}")
 
     # 3. choose h
     neg_indices = [i for i, y in enumerate(y_vals) if y < -1e-7]
@@ -162,6 +166,12 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
 
     h_id = basis_ids[idx_h] 
     val_leaving = y_vals[idx_h]
+
+    try:
+        W_full = -1 * np.linalg.inv(A_B)
+        log("\n" + format_matrix(W_full, "W (A_B^-1)"))
+    except np.linalg.LinAlgError:
+        log("\nImpossibile calcolare W (matrice singolare).")
     
     log(f"h = {h_id} (y_{h_id} = {format_fraction(val_leaving)}) -> Leaving Index")
 
@@ -192,12 +202,12 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         if abs(den) < 1e-9: continue
         
         r_val = slack / den
+        theta_str = format_fraction(r_val)
+        log(f"  theta_{con['id']} = {slack:.2f} / {den:.2f} = {theta_str}")
         
         if r_val < -1e-9: continue 
 
-        r_str = format_fraction(r_val)
-        log(f"r_{con['id']} = {slack:.2f} / {den:.2f} = {r_str}")
-        ratios_valid.append(r_str)
+        ratios_valid.append(theta_str)
         
         if r_val < best_r:
             best_r = r_val

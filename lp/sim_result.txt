@@ -1,25 +1,33 @@
 --- REPORT --- 
 
 === STEP 1 ===
-Starting point x = (0, 0, 625)
-Starting B = [1, 4, 5]
+Starting point x = (1000, 0)
+Starting B = [1, 5]
 
 A_B^T =
-  (   0.00  -1.00   0.00 )
-  (   0.60   0.00  -1.00 )
-  (   0.80   0.00   0.00 )
+  (   1.50   0.00 )
+  (   1.50  -1.00 )
 
-Dual values in B: (5/2, -4, -7/2)
-h = 4 (y_4 = -4) -> Leaving Index
 
-W^4:
+--- Find hv (leaving index = min of y_i (from dual solution) ) ---
+  1:    800  (OK)
+  5:   -300  -> FOUND
+
+W (A_B^-1) =
+  (  -0.67  -1.00 )
+  (   0.00   1.00 )
+
+h = 5 (y_5 = -300) -> Leaving Index
+
+W^5:
+  (  -1.00 )
   (   1.00 )
-  (  -0.00 )
-  (   0.00 )
 
 --- Calculating Ratios (r) ---
-r_3 = 625.00 / 1.00 = 625
+  theta_2 = 1200.00 / 0.20 = 6000
+  theta_3 = 800.00 / 1.20 = 2000/3
+  theta_4 = 1000.00 / 1.00 = 1000
 
-k = 3 (r = 625) -> Entering Index
-Next Vertex x = (625, 0, 625)
-Next Basis B = [1, 3, 5]
+k = 3 (r = 2000/3) -> Entering Index
+Next Vertex x = (333.33, 666.67)
+Next Basis B = [1, 3]

@@ -1,11 +1,7 @@
-target: min 500*y1
+target: max 1500*y1 + 2000*y2 + 1800*y3
 
 [CONSTRAINTS]
-1y2 + 1y3 >= 4
-0.6y1 + -2y2 >= 5
-0.8y1 + -1y3 >= 2
+1.5*y1 + 0.8*y2 + 1*y3 + 1*y4 <= 1200
+1.5*y1 + 1*y2 + 2.2*y3 + 1*y5 <= 1500
 
-# Bounds
-y1 >= 0
-y2 <= 0
-y3 >= 0
+solution using the starting point: y = (800, 0, 0, 0, -300)
