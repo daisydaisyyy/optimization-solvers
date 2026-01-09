@@ -61,20 +61,22 @@ def read_file(filename):
                 rhs = float(rhs_str)
                 
                 terms = []
-                raw_terms = lhs_str.replace("-", "+-").split('+')
+                clean_lhs = lhs_str.replace(" ", "")
+                clean_lhs = clean_lhs.replace("-", "+-")
+                raw_terms = clean_lhs.split('+')
                 
                 for t in raw_terms:
-                    t = t.strip()
                     if not t: continue
+                    
                     coeff = 1.0
                     var_name = t
                     
                     if '*' in t:
                         c, v = t.split('*')
-                        coeff = float(c.strip())
-                        var_name = v.strip()
-                    elif t.startswith("-") and '*' not in t:
-                        if t == "-": continue 
+                        coeff = float(c)
+                        var_name = v
+                    elif t.startswith("-"):
+                        # Caso tipo "-x1" senza asterisco
                         if len(t) > 1:
                             coeff = -1.0
                             var_name = t[1:]

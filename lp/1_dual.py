@@ -1,178 +1,125 @@
 import re
 import numpy as np
-import os
-import copy
-from fractions import Fraction
 
-INPUT_FILE = "data.txt"
-OUTPUT_FILE = "dual.txt"
+def parse_data(filename):
+    with open(filename, 'r') as f:
+        content = f.read()
 
-def format_fraction(val):
-    if abs(val) < 1e-9: return "0"
-    if abs(val - round(val)) < 1e-4: return str(int(round(val)))
-    f = Fraction(val).limit_denominator(1000)
-    if f.denominator == 1: return str(f.numerator)
-    return f"{f.numerator}/{f.denominator}"
+    # 1. Parsing Obiettivo (c)
+    # Cerca pattern tipo: target: max - 1*x1 - 1*x2
+    target_match = re.search(r'target:\s*max\s*(.*)', content)
+    c_coeffs = []
+    if target_match:
+        eq = target_match.group(1)
+        # Trova tutti i termini coefficiente*xN
+        matches = re.findall(r'([+\-]?\s*\d+)\*x(\d+)', eq)
+        # Ordina per indice variabile e estrai coeff
+        matches.sort(key=lambda x: int(x[1])) 
+        c_coeffs = [float(m[0].replace(' ', '')) for m in matches]
 
-def parse_primal(filename):
-    if not os.path.exists(filename): raise FileNotFoundError("File not found")
-    with open(filename, 'r') as f: lines = f.readlines()
-
-    c = None
-    constrs = []
-    basis_ids = []
-    is_min = True
+    # 2. Parsing Vincoli (A e b)
+    # Cerca sezioni numerate. Es: 1 : - 100*x1 - 200*x2 <= -5000
+    constraints = {}
+    rows_pattern = re.findall(r'(\d+)\s*:\s*(.*?)\s*([<>=]+)\s*([+\-]?\d+)', content)
     
-    mode = None 
-
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"): continue
+    A_rows = {}
+    b_vals = {}
+    
+    num_vars = len(c_coeffs)
+    
+    for idx_str, expr, op, rhs in rows_pattern:
+        idx = int(idx_str)
+        b_vals[idx] = float(rhs)
         
-        if "target" in line:
-            if "max" in line.lower(): is_min = False
-            elif "min" in line.lower(): is_min = True
-            continue
+        # Parsing coefficienti della riga
+        row_coeffs = [0.0] * num_vars
+        var_matches = re.findall(r'([+\-]?\s*\d+)\*x(\d+)', expr)
+        for coeff_str, var_idx in var_matches:
+            v_i = int(var_idx) - 1 # 0-based index
+            if 0 <= v_i < num_vars:
+                row_coeffs[v_i] = float(coeff_str.replace(' ', ''))
         
-        if line.startswith("c:"):
-            content = line.split(":")[1].strip(" []")
-            c = np.array([float(x) for x in content.split(",")])
-            continue
-            
-        if line.startswith("B:"):
-            content = line.split(":")[1].strip(" []")
-            basis_ids = [int(x) for x in content.split(",")]
-            continue
+        A_rows[idx] = row_coeffs
 
-        if "[POINT]" in line: mode = "POINT"; continue
-        elif "[CONSTRAINTS]" in line or "[VINCOLI]" in line: mode = "CONSTR"; continue
+    # 3. Parsing Base (B)
+    # Prende l'ultima occorrenza di B se ce ne sono multiple
+    b_matches = re.findall(r'B:\s*\[(.*?)\]', content)
+    base_indices = []
+    if b_matches:
+        base_indices = [int(x.strip()) for x in b_matches[-1].split(',')]
 
-        if mode == "CONSTR" and ":" in line:
-            parts = line.split(":")
-            try:
-                cid = int(parts[0].strip())
-                rest = parts[1]
-                
-                sign = "="
-                if "<=" in rest: sign = "<="; lhs, rhs = rest.split("<=")
-                elif ">=" in rest: sign = ">="; lhs, rhs = rest.split(">=")
-                else: lhs, rhs = rest.split("=")
-                
-                row = np.zeros(len(c)) if c is not None else np.zeros(2)
-                
-                lhs = lhs.replace("- ", "+-").replace("-x", "+-1*x")
-                terms = lhs.split("+")
-                for t in terms:
-                    t = t.strip()
-                    if not t: continue
-                    coeff = 1.0
-                    if "*" in t: 
-                        co, var = t.split("*")
-                        coeff = float(co.replace(" ", ""))
-                        var_clean = var
-                    elif "x" in t: var_clean = t
-                    else: continue
-                    
-                    match = re.search(r'x(\d+)', var_clean)
-                    if match:
-                        idx = int(match.group(1)) - 1
-                        if idx < len(row): row[idx] = coeff
-                
-                constrs.append({
-                    'id': cid, 'A': row, 'sign': sign, 'b': float(rhs)
-                })
-            except Exception: pass
+    return np.array(c_coeffs), A_rows, b_vals, base_indices
 
-    calc_constrs = []
-    if is_min and c is not None:
-        c_calc = -c
-        for con in constrs:
-            new_con = copy.deepcopy(con)
-            if new_con['sign'] == ">=":
-                new_con['A'] = -new_con['A']
-                new_con['b'] = -new_con['b']
-            calc_constrs.append(new_con)
-    else:
-        c_calc = c
-        calc_constrs = constrs
+def main():
+    input_file = 'data.txt'
+    output_file = 'dual.txt'
 
-    return c, c_calc, constrs, calc_constrs, basis_ids, is_min
-
-def write_dual_file(c, constrs, is_min, filename):
-    n = len(c)
-    with open(filename, "w") as f:
-        target = "max" if is_min else "min"
-        
-        obj = []
-        for con in constrs:
-            if abs(con['b']) > 1e-9: 
-                val = con['b']
-                if abs(val - round(val)) < 1e-4: val = int(round(val))
-                obj.append(f"{val}*y{con['id']}")
-        
-        if not obj: f.write(f"target: {target} 0\n")
-        else: f.write(f"target: {target} {' + '.join(obj)}\n")
-
-        f.write("\n[CONSTRAINTS]\n")
-        
-        rel = "<=" if is_min else ">="
-        for j in range(n): 
-            terms = []
-            for con in constrs:
-                coeff = con['A'][j]
-                if abs(coeff) > 1e-9:
-                    c_val = coeff
-                    if abs(c_val - round(c_val)) < 1e-4: c_val = int(round(c_val))
-                    terms.append(f"{c_val}*y{con['id']}")
-            
-            c_rhs = c[j]
-            if abs(c_rhs - round(c_rhs)) < 1e-4: c_rhs = int(round(c_rhs))
-            f.write(f"{' + '.join(terms)} {rel} {c_rhs}\n")
-            
-    print(f"Dual text saved to {filename}")
-
-def solve_dual_values(c_calc, calc_constrs, basis_ids):
-    if not basis_ids:
-        print("No basis found. Cannot solve dual.")
+    try:
+        c, A_dict, b_dict, B_indices = parse_data(input_file)
+    except Exception as e:
+        print(f"Errore nel parsing del file: {e}")
         return
 
-    con_map = {x['id']: x for x in calc_constrs}
-    rows = []
-    
+    # Costruisci matrice A_B basata sugli indici della base
+    # Nota: B contiene indici 1-based delle righe (vincoli)
     try:
-        for bid in basis_ids:
-            rows.append(con_map[bid]['A'])
-    except KeyError:
-        print("Error: Basis ID not found in constraints.")
+        A_B_list = [A_dict[idx] for idx in B_indices]
+        A_B = np.array(A_B_list)
+        print("A_B^T:\n",A_B.T)
+    except KeyError as e:
+        print(f"Errore: Indice di base {e} non trovato nei vincoli.")
         return
 
-    A_B = np.array(rows)
-    
+    # Calcolo soluzione duale y_B = A_B^-1 * c_T
+    # c è trattato come vettore colonna per l'operazione
     try:
-        y_vals = np.linalg.solve(A_B.T, c_calc)
+        A_B_inv = np.linalg.inv(A_B)
+        print("\nA_B^-1:\n",A_B_inv)
+        y_B_vals = c @ A_B_inv
+        print("\nc:",c)
     except np.linalg.LinAlgError:
-        print("Singular matrix. Cannot solve dual.")
+        print("Errore: La matrice A_B è singolare (non invertibile).")
         return
 
-    max_id = max(c['id'] for c in calc_constrs)
-    full_y = ["0"] * (max_id + 1)
+    # Mappa i valori calcolati nel vettore y completo (indicizzato per vincolo)
+    # Inizializza tutto a 0
+    all_indices = sorted(A_dict.keys())
+    y_full = {idx: 0.0 for idx in all_indices}
     
-    for i, bid in enumerate(basis_ids):
-        val = y_vals[i]
-        full_y[bid] = format_fraction(val)
+    for i, basis_idx in enumerate(B_indices):
+        y_full[basis_idx] = y_B_vals[i]
 
-    final_str = "(" + ", ".join(full_y[1:]) + ")"
-    
-    print(f"solution using the starting point: y = {final_str}")
-    
-    with open(OUTPUT_FILE, "a") as f:
-        f.write(f"\nsolution using the starting point: y = {final_str}\n")
+    with open(output_file, 'w') as f:
+        f.write("=== dual problem ===\n")
+        
+        # target function
+        obj_terms = []
+        for idx in all_indices:
+            val = b_dict[idx]
+            if val != 0:
+                obj_terms.append(f"{val}*y{idx}")
+        f.write(f"Min W = {' + '.join(obj_terms)}\n\n")
+        
+        # dual constraints: A^T * y = c
+        num_vars = len(c)
+        for j in range(num_vars):
+            constraint_terms = []
+            for idx in all_indices:
+                coeff = A_dict[idx][j]
+                if coeff != 0:
+                    constraint_terms.append(f"({coeff})*y{idx}")
+            
+            line = f"{' + '.join(constraint_terms)} = {c[j]}\n"
+            f.write(line)
+        
+        f.write("\n=== dual solution y ===\n")
+        f.write("y_B = A_B^-1 * c_T\n")
+        f.write("y=(")
+        for idx in all_indices:
+            f.write(f"{y_full[idx]:.4f},")
+        f.write(')')
+
+    print(f"Operazione completata. Risultati salvati in {output_file}")
 
 if __name__ == "__main__":
-    try:
-        c, c_calc, constrs, calc_constrs, basis, is_min = parse_primal(INPUT_FILE)
-        write_dual_file(c, constrs, is_min, OUTPUT_FILE)
-        print(c,c_calc)
-        solve_dual_values(c, calc_constrs, basis)
-    except Exception as e:
-        print(f"Error: {e}")
+    main()

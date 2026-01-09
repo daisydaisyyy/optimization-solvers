@@ -26,6 +26,17 @@ def format_vec_flat(v):
         else: vals.append(f"{x:.2f}")
     return "(" + ", ".join(vals) + ")"
 
+def format_vec_fraction(v):
+    vals = []
+    for x in v:
+        f = Fraction(x).limit_denominator(1000)
+        if f.denominator == 1: 
+            vals.append(str(f.numerator))
+        else: 
+            vals.append(f"{f.numerator}/{f.denominator}")
+    return "(" + ", ".join(vals) + ")"
+
+
 def format_matrix(M, name="Matrix"):
     rows, cols = M.shape
     out = f"{name} =\n"
@@ -124,7 +135,7 @@ def parse_input(filename):
 
 def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
     log(f"\n=== STEP {step_num} ===")
-    log(f"Starting point x = {format_vec_flat(x_curr)}")
+    log(f"Starting point x = {format_vec_fraction(x_curr)} = {format_vec_flat(x_curr)}")
     log(f"Starting B = {basis_ids}")
 
     # 1. A_B matrix
@@ -144,7 +155,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         return None, None, True
 
 
-    log("\n--- Find hv (leaving index = min of y_i (from dual solution) ) ---")
+    log("\n--- Find h (leaving index = min of y_i (from dual solution) ) ---")
     for i, bid in enumerate(basis_ids):
         val = y_vals[i]
         status = " -> FOUND" if val < -1e-7 else " (OK)"
@@ -157,7 +168,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
     # 3. choose h
     neg_indices = [i for i, y in enumerate(y_vals) if y < -1e-7]
     if not neg_indices:
-        log("\n>>> OPTIMAL REACHED (All lambda >= 0).")
+        log("\n>>> OPTIMAL REACHED (All y >= 0).")
         return None, None, True
 
     idx_h = neg_indices[0] 
@@ -224,7 +235,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
     x_new = x_curr + best_r * w_vec
     new_basis = sorted([b for b in basis_ids if b != h_id] + [k])
     
-    log(f"Next Vertex x = {format_vec_flat(x_new)}")
+    log(f"Next Vertex x = {format_vec_fraction(x_new)} = {format_vec_flat(x_new)}")
     log(f"Next Basis B = {new_basis}")
     
     return x_new, new_basis, False

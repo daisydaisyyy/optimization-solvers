@@ -7,35 +7,33 @@ from gurobipy import Model, GRB, quicksum
 
 INPUT_FILE = "data.txt"
 
+def format_frac(val):
+    try:
+        f = fractions.Fraction(val).limit_denominator(1000)
+        if f.denominator == 1: return str(f.numerator)
+        return f"{f.numerator}/{f.denominator}"
+    except:
+        return f"{val:.4f}"
+
 def get_fractional_part(val):
     tol = 1e-9
-    if abs(val - round(val)) < tol: 
-        return 0.0
+    if abs(val - round(val)) < tol: return 0.0
     return val - math.floor(val + tol)
-
-def format_frac(val):
-    f = fractions.Fraction(val).limit_denominator(1000)
-    if f.denominator == 1: return str(f.numerator)
-    return f"{f.numerator}/{f.denominator}"
 
 def parse_input(data_filename):
     if not os.path.exists(data_filename):
-        print("data.txt missing")
+        print(f"File {data_filename} not found.")
         return None, None, None, None, None
 
     with open(data_filename, 'r') as f:
         content = f.read()
 
     sense = GRB.MAXIMIZE 
-    if re.search(r'target:.*min', content, re.IGNORECASE):
-        print(">>> Problem detected as MINIMIZATION")
-        sense = GRB.MINIMIZE
-    elif re.search(r'target:.*max', content, re.IGNORECASE):
-        print(">>> Problem detected as MAXIMIZATION")
-        sense = GRB.MAXIMIZE
+    if re.search(r'target:.*min', content, re.IGNORECASE): sense = GRB.MINIMIZE
+    elif re.search(r'target:.*max', content, re.IGNORECASE): sense = GRB.MAXIMIZE
 
     c_match = re.search(r'c:\s*\[(.*?)\]', content)
-    c = np.array([float(x.strip()) for x in c_match.group(1).split(',')])
+    c = np.array([float(x.strip()) for x in c_match.group(1).split(',')]) if c_match else np.array([])
     n_vars = len(c)
 
     A_rows, b_vec, signs = [], [], []
@@ -44,21 +42,10 @@ def parse_input(data_filename):
     
     for line in lines:
         line = line.strip()
-        
-        if '[CONSTRAINTS]' in line or '[VINCOLI]' in line: 
-            parsing = True
-            continue
-            
-        if 'B:' in line: 
-            parsing = False
-            break
-
-        if "Non neg" in line or "non neg" in line.lower():
-            parsing = False
-            continue
-      
-        if not parsing or not line or line.startswith('#'): 
-            continue
+        if '[CONSTRAINTS]' in line or '[VINCOLI]' in line: parsing = True; continue
+        if 'B:' in line: parsing = False; break
+        if "Non neg" in line or "non neg" in line.lower(): parsing = False; continue
+        if not parsing or not line or line.startswith('#'): continue
 
         if ':' in line and ('<=' in line or '>=' in line or '=' in line):
             if '<=' in line: sign, parts = '<=', line.split('<=')
@@ -67,59 +54,31 @@ def parse_input(data_filename):
             
             lhs = parts[0].split(':', 1)[1].strip() if ':' in parts[0] else parts[0].strip()
             rhs = float(parts[1].strip())
-            row = np.zeros(n_vars)
             
+            row = np.zeros(n_vars)
             terms = lhs.replace('-', '+-').split('+')
             for term in terms:
                 term = term.strip()
                 if not term: continue
                 if '*' in term:
                     c_str, v_s = term.split('*')
-                    coeff = float(c_str.replace(' ', ''))
-                    var_idx = int(re.search(r'x(\d+)', v_s).group(1)) - 1
-                    row[var_idx] += coeff
+                    try: coeff = float(c_str.replace(' ', ''))
+                    except: coeff = 1.0
+                    match = re.search(r'x(\d+)', v_s)
+                    if match: row[int(match.group(1)) - 1] += coeff
                 elif 'x' in term:
                     coeff = -1.0 if term.startswith('-') else 1.0
-                    var_idx = int(re.search(r'x(\d+)', term).group(1)) - 1
-                    row[var_idx] += coeff
+                    match = re.search(r'x(\d+)', term)
+                    if match: row[int(match.group(1)) - 1] += coeff
             
             A_rows.append(row)
             b_vec.append(rhs)
             signs.append(sign)
 
-    print(f"Parsed {n_vars} variables, {len(b_vec)} constraints.")
     return np.array(A_rows), np.array(b_vec), signs, c, sense
 
 def solve_gomory(A, b, signs, c, sense):
     m, n = A.shape
-    
-    print("\n--- A ---")
-    for i in range(m):
-        row_str = "  ".join([f"{x:6.2f}" for x in A[i]])
-        print(f"Row {i+1}: [ {row_str} ]  {signs[i]} {b[i]}")
-
-    print("\n--- SYSTEM + SLACK VARS ---")
-    for i in range(m):
-        terms_str = []
-        for j in range(n):
-            coeff = A[i,j]
-            if abs(coeff) > 1e-9:
-                sign = "+" if coeff >= 0 else "-"
-                abs_val = abs(coeff)
-                val_str = f"{abs_val:g}"
-                term = f"{sign} {val_str}x{j+1}"
-                terms_str.append(term)
-        
-        s_name = f"s{i+1}"
-        if signs[i] == '<=':
-            terms_str.append(f"+ {s_name}")
-        elif signs[i] == '>=':
-            terms_str.append(f"- {s_name}")
-        
-        full_line = " ".join(terms_str).strip()
-        if full_line.startswith("+ "): full_line = full_line[2:]
-            
-        print(f"{full_line} = {b[i]:g}")
     
     model = Model("lp")
     model.Params.OutputFlag = 0
@@ -130,38 +89,27 @@ def solve_gomory(A, b, signs, c, sense):
     
     for i in range(m):
         expr = quicksum(A[i, j] * x[j] for j in range(n))
-        if signs[i] == '<=':
-            model.addConstr(expr + s[i] == b[i], name=f"c{i}")
-        elif signs[i] == '>=':
-            model.addConstr(expr - s[i] == b[i], name=f"c{i}")
-        else: 
-            model.addConstr(expr == b[i], name=f"c{i}")
+        if signs[i] == '<=': model.addConstr(expr + s[i] == b[i], name=f"c{i}")
+        elif signs[i] == '>=': model.addConstr(expr - s[i] == b[i], name=f"c{i}")
+        else: model.addConstr(expr == b[i], name=f"c{i}")
 
     model.optimize()
-    
     if model.status != GRB.OPTIMAL:
         print("Optimal solution not found.")
         return
 
-    print("\n--- OPT BASIS ---")
-    
     names_list = [f"x{i+1}" for i in range(n)] + [f"s{i+1}" for i in range(m)]
     vars_gurobi = [x[i] for i in range(n)] + [s[i] for i in range(m)]
     
-    for i, var in enumerate(vars_gurobi):
-        val = var.X
-        if abs(val) > 1e-4:
-            print(f"  {names_list[i]:<4}: {val:8.4f}")
-
     basis_idxs = []
-    basis_print = [] 
+    non_basis_idxs = []
+    
     for idx, var in enumerate(vars_gurobi):
-        if var.VBasis == 0: 
+        if var.VBasis == 0:
             basis_idxs.append(idx)
-            basis_print.append(idx+1)
-    basis_names = [names_list[i] for i in basis_idxs]
-    print(f"\nB: {basis_print} (vars: {basis_names})")
-
+        else:
+            non_basis_idxs.append(idx)
+            
     S_mat = np.zeros((m, m))
     for i, sign in enumerate(signs):
         if sign == '<=': S_mat[i, i] = 1.0
@@ -169,215 +117,145 @@ def solve_gomory(A, b, signs, c, sense):
         
     A_total = np.hstack([A, S_mat])
     
-    non_basis_idxs = [i for i in range(A_total.shape[1]) if i not in basis_idxs]
-    non_basis_names = [names_list[i] for i in non_basis_idxs]
-
     try:
-        B_mat = A_total[:, basis_idxs]
+        A_B = A_total[:, basis_idxs]
+        A_N = A_total[:, non_basis_idxs]
         
-        print("\n--- A_B ---")
-        for i in range(m):
-            row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in B_mat[i, :]]
-            print(f"  Row {i+1}: " + "  ".join(row_vals))
-        
-        if non_basis_idxs:
-            A_N = A_total[:, non_basis_idxs]
-            print("\n--- A_N ---")
-            print(f"  Cols: {non_basis_names}")
-            for i in range(m):
-                row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in A_N[i, :]]
-                print(f"  Row {i+1}: " + "  ".join(row_vals))
-        else:
-            A_N = None
-
-        if B_mat.shape[1] != m:
-            print(f"Base dimension error.")
+        if A_B.shape[1] != m:
+            print("Basis dimension error.")
             return
-        B_inv = np.linalg.inv(B_mat)
+        A_B_inv = np.linalg.inv(A_B)
     except Exception as e:
-        print("Base matrix inversion error:", e)
+        print("Matrix Error:", e)
         return
 
-    print("\n--- A_B^-1 ---")
+    print("\n" + "="*60)
+    print("      A~")
+    print("="*60)
+
+    print("\n[1] A_B^-1:")
+    for row in A_B_inv:
+        print("  " + "  ".join([f"{format_frac(v):>8}" for v in row]))
+        
+    print("\n[2] A_N:")
+    non_basic_names = [names_list[i] for i in non_basis_idxs]
+    header_N = "".join([f"{n:>8} " for n in non_basic_names])
+    print(f"     {header_N}")
+    for row in A_N:
+        print("  " + "  ".join([f"{format_frac(v):>8}" for v in row]))
+
+    print("\n[3] A~_N = A_B^-1 * A_N")
+    
+    A_tilde_N = A_B_inv @ A_N
+    
+    header_tilde = "".join([f"{n:>10} " for n in non_basic_names])
+    print(f"     {header_tilde}")
+    print("-" * (6 + len(header_tilde)))
     for i in range(m):
-        row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in B_inv[i, :]]
-        print(f"  Row {i+1}: " + "  ".join(row_vals))
+        row_str = "  "
+        for val in A_tilde_N[i]:
+            row_str += f"{format_frac(val):>10} "
+        print(row_str)
 
-    if A_N is not None:
-        A_tilde = B_inv @ A_N
-        
-        print("\n--- A_B^-1 * A_N ---")
-        print(f"  Non-basic vars: {non_basis_names}")
-        for i in range(m):
-            row_vals = [f"{val:8.4f} ({format_frac(val)})" for val in A_tilde[i, :]]
-            print(f"  Row {i+1}: " + "  ".join(row_vals))
+    print("\n[4] b~ = A_B^-1 * b")
+    b_tilde = A_B_inv @ b
+    
+    for val in b_tilde:
+        print(f"     {format_frac(val):>10}")
 
-    x_B_val = B_inv @ b
+    print("\n" + "="*60)
+    print("      GOMORY CUT GENERATION")
+    print("="*60)
+
+    generated_cuts = []
     
-    print("\n--- FRACTIONAL ROWS ---")
-    fractional_rows = []
-    
-    for i in range(len(basis_idxs)):
-        global_idx = basis_idxs[i]
-        var_name = names_list[global_idx]
-        val = x_B_val[i]
-        f0 = get_fractional_part(val)
+    for i in range(m):
+        basic_var_idx = basis_idxs[i]
+        basic_var_name = names_list[basic_var_idx]
         
-        print(f"Row {i+1} ({var_name}): Val={val:.4f}, f₀={f0:.4f}")
+        val_b = b_tilde[i]
+        f0 = get_fractional_part(val_b)
         
         if f0 > 1e-4 and f0 < (1 - 1e-4):
-            fractional_rows.append((i, f0, val))
-
-    print("\n--- GOMORY CUTS ---")
-    
-    generated_cuts = []
-
-    if not fractional_rows:
-        print("No fractional rows found.")
-    else:
-        for row_idx, f0, val in fractional_rows:
-            global_idx = basis_idxs[row_idx]
-            var_name = names_list[global_idx]
-            current_row_num = row_idx + 1
+            print(f"\n>>> ROW {i+1} (Basic Variable: {basic_var_name}) is fractional")
+            print(f"    b~ = {format_frac(val_b)} -> Fractional Part f0 = {format_frac(f0)}")
             
-            print(f"\n>>> ROW {current_row_num} ({var_name})")
+            row_coeffs = A_tilde_N[i]
+            cut_lhs = []
             
-            row_B_inv = B_inv[row_idx, :]
+            print(f"    Row coefficients in A~_N:")
             
-            print(f"    [Step 1] row {current_row_num} of B^-1:")
-            pi_str = ", ".join([f"{x:.3f}" for x in row_B_inv])
-            print(f"      pi = [{pi_str}]")
-            
-            print(f"    [Step 2] (pi * Column_j):")
-            
-            row_tableau = np.zeros(len(names_list))
-            for j in range(A_total.shape[1]):
-                col_vec = A_total[:, j]
-                coeff = np.dot(row_B_inv, col_vec)
-                row_tableau[j] = coeff
-                
-                is_basic = (j == global_idx)
-                if abs(coeff) > 1e-4 and (j not in basis_idxs or is_basic):
-                    product_terms = []
-                    for p_val, a_val in zip(row_B_inv, col_vec):
-                        product_terms.append(f"({p_val:.3f}*{a_val:.3g})")
-                    expansion_str = " + ".join(product_terms)
-                    print(f"      part_coeff({names_list[j]}) = {expansion_str} = {coeff:.4f} ({format_frac(coeff)})")
-            
-            eq_terms = []
-            for j in range(len(row_tableau)):
-                coeff = row_tableau[j]
-                if abs(coeff) > 1e-5 and j != global_idx:
-                     eq_terms.append(f"({format_frac(coeff)}){names_list[j]}")
-            
-            print(f"\n      {var_name} + {' + '.join(eq_terms)} = {format_frac(val)}")
-
-            cut_lhs_terms = []
-            print(f"    [Step 3] find cut equation COEFF = part_coeff - floor(part_coeff):")
-            
-            slacks_of_interest = range(len(row_tableau)) 
-            for col_idx in slacks_of_interest:
-                coeff = row_tableau[col_idx]
-                if col_idx == global_idx: continue
-                if abs(coeff) < 1e-5: continue
-
+            for j, coeff in enumerate(row_coeffs):
+                var_name = non_basic_names[j]
                 fj = get_fractional_part(coeff)
-                int_part = math.floor(coeff + 1e-9)
                 
-                val_str = format_frac(coeff)
-                fj_str = format_frac(fj)
+                if abs(coeff) > 1e-9:
+                    print(f"      {var_name}: coeff {format_frac(coeff):>6} -> frac {format_frac(fj):>6}")
                 
-                print(f"      {names_list[col_idx]}: coeff = {val_str} - floor({val_str}) = {val_str} - ({int_part}) = {fj_str}")
-
                 if fj > 1e-5:
-                    cut_lhs_terms.append((fj, names_list[col_idx]))
-
-            if not cut_lhs_terms:
-                print("    No cut generated (integer coefficients).")
-                continue
-
-            generated_cuts.append({
-                'id': current_row_num,
-                'var': var_name,
-                'lhs': cut_lhs_terms,
-                'rhs': f0
-            })
-
-            frac_cut_str = " + ".join([f"{{{format_frac(c)}}}{v}" for c, v in cut_lhs_terms])
-            print(f"\n    => CUT:")
-            print(f"    {frac_cut_str} >= {format_frac(f0)}") 
+                    cut_lhs.append((fj, var_name))
             
-            common_mult = 8
-            int_terms = []
-            for fj, vname in cut_lhs_terms:
-                val_int = int(round(fj * common_mult))
-                int_terms.append(f"{val_int}{vname}")
-            rhs_int = int(round(f0 * common_mult))
-            
+            if cut_lhs:
+                generated_cuts.append({
+                    'id': i+1, 'var': basic_var_name,
+                    'lhs': cut_lhs, 'rhs': f0
+                })
+                
+                cut_str = " + ".join([f"{format_frac(c)} {v}" for c, v in cut_lhs])
+                
+                print(f"    => GENERATED CUT:")
+                print(f"       {cut_str} >= {format_frac(f0)}")
+            else:
+                print("    No cut generated (all coefficients are integers).")
 
-    print("-" * 40)
+    print("\n" + "="*60)
+    print("      CHECK WITH INTEGER OPTIMUM")
+    print("="*60)
     
-    model_int = Model("gomory_int")
+    model_int = Model("ilp")
     model_int.Params.OutputFlag = 0
     xi = model_int.addVars(n, lb=0, vtype=GRB.INTEGER, name="x")
-    
     model_int.setObjective(quicksum(c[i] * xi[i] for i in range(n)), sense)
-    
     for i in range(m):
         expr = quicksum(A[i, j] * xi[j] for j in range(n))
-        if signs[i] == '<=':
-            model_int.addConstr(expr <= b[i])
-        elif signs[i] == '>=':
-            model_int.addConstr(expr >= b[i])
-        else: 
-            model_int.addConstr(expr == b[i])
-
+        if signs[i] == '<=': model_int.addConstr(expr <= b[i])
+        elif signs[i] == '>=': model_int.addConstr(expr >= b[i])
+        else: model_int.addConstr(expr == b[i])
     model_int.optimize()
     
     obj_int = None
     if model_int.status == GRB.OPTIMAL:
-        sol_int = np.array([xi[i].X for i in range(n)])
         obj_int = model_int.ObjVal
-        
-        sol_int_rounded = tuple(np.round(sol_int).astype(int).tolist())
-        
-        print(f"optimal value = {obj_int:.1f}")
-        print(f"optimal integer solution: {sol_int_rounded}")
+        sol_int = [xi[i].X for i in range(n)]
+        print(f"Integer Optimum (Target): {obj_int:.4f}")
+        print(f"Optimal Integer Solution: {sol_int}")
     else:
-        print("integer solution not found.")
+        print("Integer solution not found.")
 
-    # choose a cut and add it to the problem, then check if we obtain the optimal solution of the integer problem
     if generated_cuts and obj_int is not None:
-        print("\nWhich cut do you want to use?")
-        for i, cut_data in enumerate(generated_cuts):
-             print(f"{i+1}: Cut from Row {cut_data['id']} ({cut_data['var']})")
+        print("\nChoose a cut to verify:")
+        for i, cut in enumerate(generated_cuts):
+             print(f"{i+1}: Cut from Row {cut['id']} ({cut['var']})")
         
         try:
-            choice = int(input("Enter number: "))
-            if 1 <= choice <= len(generated_cuts):
-                selected_cut = generated_cuts[choice - 1]
-                
-                name_to_var = {name: var for name, var in zip(names_list, vars_gurobi)}
-                
-                cut_expr = quicksum(coeff * name_to_var[vname] for coeff, vname in selected_cut['lhs'])
-                model.addConstr(cut_expr >= selected_cut['rhs'], name="user_cut")
-                
-                model.optimize()
-                
-                if model.status == GRB.OPTIMAL:
-                    new_opt = model.ObjVal
-                    print(f"New relaxed optimum: {new_opt:.4f}")
+            inp = input("Number: ")
+            if inp.strip():
+                choice = int(inp)
+                if 1 <= choice <= len(generated_cuts):
+                    sel = generated_cuts[choice - 1]
                     
-                    if abs(new_opt - obj_int) < 1e-4:
-                        print("Is it the optimal solution of the ILP? YES")
-                    else:
-                        print("Is it the optimal solution of the ILP? NO")
-                else:
-                    print("Relaxed problem became infeasible.")
-            else:
-                print("Invalid selection.")
-        except ValueError:
-            print("Invalid input.")
+                    name_map = {vn: v for vn, v in zip(names_list, vars_gurobi)}
+                    expr = quicksum(c * name_map[v] for c, v in sel['lhs'])
+                    model.addConstr(expr >= sel['rhs'], "user_cut")
+                    model.optimize()
+                    
+                    if model.status == GRB.OPTIMAL:
+                        new_opt = model.ObjVal
+                        print(f"New relaxed optimum: {new_opt:.4f}")
+                        if abs(new_opt - obj_int) < 1e-4: print(">>> SUCCESS: Integer optimum reached!")
+                        else: print(">>> Result: Not yet integer optimum (more cuts needed).")
+                    else: print("Problem became infeasible.")
+        except ValueError: pass
 
 if __name__ == "__main__":
     A, b, signs, c, sense = parse_input(INPUT_FILE)
