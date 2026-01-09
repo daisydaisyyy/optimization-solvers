@@ -20,6 +20,9 @@ def get_fractional_part(val):
     if abs(val - round(val)) < tol: return 0.0
     return val - math.floor(val + tol)
 
+def lcm(a, b):
+    return abs(a*b) // math.gcd(a, b)
+
 def parse_input(data_filename):
     if not os.path.exists(data_filename):
         print(f"File {data_filename} not found.")
@@ -144,7 +147,7 @@ def solve_gomory(A, b, signs, c, sense):
     for row in A_N:
         print("  " + "  ".join([f"{format_frac(v):>8}" for v in row]))
 
-    print("\n[3] A~_N = A_B^-1 * A_N")
+    print("\n[3] A~ = A_B^-1 * A_N")
     
     A_tilde_N = A_B_inv @ A_N
     
@@ -182,9 +185,14 @@ def solve_gomory(A, b, signs, c, sense):
             
             row_coeffs = A_tilde_N[i]
             cut_lhs = []
+            denominators = []
             
             print(f"    Row coefficients in A~_N:")
             
+            rhs_frac_obj = fractions.Fraction(f0).limit_denominator(1000)
+            if rhs_frac_obj.denominator > 1:
+                denominators.append(rhs_frac_obj.denominator)
+
             for j, coeff in enumerate(row_coeffs):
                 var_name = non_basic_names[j]
                 fj = get_fractional_part(coeff)
@@ -194,6 +202,9 @@ def solve_gomory(A, b, signs, c, sense):
                 
                 if fj > 1e-5:
                     cut_lhs.append((fj, var_name))
+                    f_obj = fractions.Fraction(fj).limit_denominator(1000)
+                    if f_obj.denominator > 1:
+                        denominators.append(f_obj.denominator)
             
             if cut_lhs:
                 generated_cuts.append({
@@ -202,9 +213,24 @@ def solve_gomory(A, b, signs, c, sense):
                 })
                 
                 cut_str = " + ".join([f"{format_frac(c)} {v}" for c, v in cut_lhs])
-                
-                print(f"    => GENERATED CUT:")
+                print(f"    => GENERATED CUT (Fractional):")
                 print(f"       {cut_str} >= {format_frac(f0)}")
+
+                if denominators:
+                    current_lcm = 1
+                    for d in denominators:
+                        current_lcm = lcm(current_lcm, d)
+                    
+                    int_lhs_parts = []
+                    for c_val, v_name in cut_lhs:
+                        int_coeff = int(round(c_val * current_lcm))
+                        int_lhs_parts.append(f"{int_coeff} {v_name}")
+                    
+                    int_rhs = int(round(f0 * current_lcm))
+                    int_cut_str = " + ".join(int_lhs_parts)
+                    
+                    print(f"       {int_cut_str} >= {int_rhs}")
+
             else:
                 print("    No cut generated (all coefficients are integers).")
 

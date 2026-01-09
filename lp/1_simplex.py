@@ -86,10 +86,22 @@ def parse_input(filename):
         if mode == "POINT":
             if "target" in line or "c:" in line: continue
             try:
+                # fraction values handling
                 parts = line.split(',')
-                vals = [float(x) for x in parts if x.strip().lstrip('-').replace('.','',1).isdigit()]
+                vals = []
+                for p in parts:
+                    p = p.strip()
+                    if '/' in p:
+                        n, d = p.split('/')
+                        vals.append(float(n)/float(d))
+                    elif p:
+                         clean_p = ''.join(c for c in p if c.isdigit() or c in '.-')
+                         if clean_p: vals.append(float(clean_p))
+                
                 if vals: x_start = np.array(vals)
-            except: continue
+            except Exception as e: 
+                print(f"Error parsing point: {e}")
+                continue
             
         elif mode == "CONSTR":
             if ":" in line and ("<=" in line or ">=" in line or "=" in line):
@@ -126,7 +138,6 @@ def parse_input(filename):
                 except Exception as e: 
                     print(f"Parsing error on row {con_id}: {e}")
 
-    # change thee sign of c for minimization problems
     if is_min and c_vec is not None:
         print(">>> Minimization detected: Flipping c vector sign.")
         c_vec = -c_vec
@@ -160,6 +171,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         val = y_vals[i]
         status = " -> FOUND" if val < -1e-7 else " (OK)"
         log(f"  {bid}: {format_fraction(val):>6} {status}")
+    
     y_full_map = {}
     for idx, bid in enumerate(basis_ids):
         y_full_map[bid] = y_vals[idx]
@@ -172,8 +184,6 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         return None, None, True
 
     idx_h = neg_indices[0] 
-    # for i in neg_indices:
-    #      if y_vals[i] < y_vals[idx_h]: idx_h = i
 
     h_id = basis_ids[idx_h] 
     val_leaving = y_vals[idx_h]
@@ -182,7 +192,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         W_full = -1 * np.linalg.inv(A_B)
         log("\n" + format_matrix(W_full, "W (A_B^-1)"))
     except np.linalg.LinAlgError:
-        log("\nImpossibile calcolare W (matrice singolare).")
+        log("\nW is a singular matrix.")
     
     log(f"h = {h_id} (y_{h_id} = {format_fraction(val_leaving)}) -> Leaving Index")
 
@@ -203,18 +213,26 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
     non_basic_con = sorted([c for c in constraints if c['id'] not in basis_ids], key=lambda x: x['id'])
     
     for con in non_basic_con:
-        slack = con['b'] - np.dot(con['A'], x_curr)
+        Ax_val = np.dot(con['A'], x_curr)
+        slack = con['b'] - Ax_val
         den = np.dot(con['A'], w_vec)
         
-        # ignore constraints not limiting the step
+        # consider only den > 0 (we are moving towards the constraint)
         if den <= 1e-9:
             continue
-
-        if abs(den) < 1e-9: continue
         
         r_val = slack / den
         theta_str = format_fraction(r_val)
-        log(f"  theta_{con['id']} = {slack:.2f} / {den:.2f} = {theta_str}")
+        
+        cid = con['id']
+        # (b_i - A_i x) / (A_i w_h)
+        b_str = f"{con['b']:.4f}".rstrip('0').rstrip('.')
+        Ax_str = f"{Ax_val:.4f}"
+        den_str = f"{den:.4f}"
+        
+        expanded_calc = f"({b_str} - {Ax_str}) / {den_str}"
+        
+        log(f"  theta_{cid} = {expanded_calc} = {theta_str}")
         
         if r_val < -1e-9: continue 
 
@@ -250,7 +268,7 @@ if __name__ == "__main__":
                 input_str = input("How many simplex steps? ")
                 max_steps = int(input_str)
             except ValueError:
-                print("Input non valido. Eseguo 1 passo di default.")
+                print("Not valid. Executing 1 step by default")
                 max_steps = 1
 
             for i in range(1, max_steps + 1):
@@ -259,6 +277,8 @@ if __name__ == "__main__":
                 x_curr = x_next
                 basis_ids = basis_next
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error during execution: {e}")
+            import traceback
+            traceback.print_exc()
             
         print(f"\nOutput SAVED to {OUTPUT_FILE}")

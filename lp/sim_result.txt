@@ -1,47 +1,36 @@
 --- REPORT --- 
 
 === STEP 1 ===
-Starting point x = (50, 0) = (50, 0)
-Starting B = [1, 4]
+Starting point x = (125, 0, 0) = (125, 0, 0)
+Starting B = [3, 5, 6]
 
 A_B^T =
-  ( -100.00   0.00 )
-  ( -200.00  -1.00 )
+  (   4.00   0.00   0.00 )
+  (   5.00  -1.00   0.00 )
+  (   3.00   0.00  -1.00 )
 
 
 --- Find h (leaving index = min of y_i (from dual solution) ) ---
-  1:  1/100  (OK)
-  4:     -1  -> FOUND
+  3:   95/4  (OK)
+  5:  155/4  (OK)
+  6:  -15/4  -> FOUND
 
 W (A_B^-1) =
-  (   0.01  -2.00 )
-  (   0.00   1.00 )
+  (  -0.25  -1.25  -0.75 )
+  (   0.00   1.00   0.00 )
+  (   0.00   0.00   1.00 )
 
-h = 4 (y_4 = -1) -> Leaving Index
+h = 6 (y_6 = -15/4) -> Leaving Index
 
-W^4:
-  (  -2.00 )
+W^6:
+  (  -0.75 )
+  (  -0.00 )
   (   1.00 )
 
 --- Calculating Ratios (r) ---
-  theta_2 = 13000.00 / 700.00 = 130/7
-  theta_3 = 50.00 / 2.00 = 25
+  theta_2 = (800 - 500.0000) / 7.0000 = 300/7
+  theta_4 = (-0 - -125.0000) / 0.7500 = 500/3
 
-k = 2 (r = 130/7) -> Entering Index
-Next Vertex x = (90/7, 130/7) = (12.86, 18.57)
-Next Basis B = [1, 2]
-
-=== STEP 2 ===
-Starting point x = (90/7, 130/7) = (12.86, 18.57)
-Starting B = [1, 2]
-
-A_B^T =
-  ( -100.00 -500.00 )
-  ( -200.00 -300.00 )
-
-
---- Find h (leaving index = min of y_i (from dual solution) ) ---
-  1:  1/350  (OK)
-  2:  1/700  (OK)
-
->>> OPTIMAL REACHED (All y >= 0).
+k = 2 (r = 300/7) -> Entering Index
+Next Vertex x = (650/7, 0, 300/7) = (92.86, 0, 42.86)
+Next Basis B = [2, 3, 5]

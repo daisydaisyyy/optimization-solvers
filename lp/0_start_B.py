@@ -36,7 +36,16 @@ def read_file(filename):
             if "target" in line or line.startswith("c:"):
                 continue
             try:
-                point = [float(x.strip()) for x in line.split(',')]
+                raw_coords = line.split(',')
+                point = []
+                for coord in raw_coords:
+                    coord = coord.strip()
+                    if '/' in coord:
+                        num, den = coord.split('/')
+                        val = float(num) / float(den)
+                    else:
+                        val = float(coord)
+                    point.append(val)
             except ValueError:
                 continue
         
