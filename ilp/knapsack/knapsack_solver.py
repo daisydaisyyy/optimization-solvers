@@ -2,6 +2,7 @@ import sys
 import math
 import numpy as np 
 from fractions import Fraction
+from collections import deque, defaultdict
 import os
 
 class Node:
@@ -24,10 +25,10 @@ class TreeVisualizer:
         for item in self.items:
             item['r'] = item['v'] / item['p']
         
+        # Ordinamento per efficienza
         self.items_sorted = sorted(self.items, key=lambda x: x['r'], reverse=True)
         self.items_by_id = sorted(self.items, key=lambda x: x['id'])
         self.best_value = 0
-        self.node_counter = 0 
 
     def precalc_node(self, taken):
         sol_vector = {}
@@ -46,7 +47,7 @@ class TreeVisualizer:
                 calc_parts.append(f"{int(item['v'])}")
 
         if current_w > self.capacity:
-            return None # not feasible
+            return None # Not feasible
 
         remaining_cap = self.capacity - current_w
         split_item = None
@@ -68,7 +69,11 @@ class TreeVisualizer:
                     current_v += added_val
                     current_w += remaining_cap
                     split_item = item['id']
-                    calc_parts.append(f"({frac:.2f}*{int(item['v'])})")
+                    
+                    # Calcolo esplicito della frazione
+                    f_obj = Fraction(frac).limit_denominator()
+                    calc_parts.append(f"({f_obj.numerator}/{f_obj.denominator} * {int(item['v'])})")
+                    
                     remaining_cap = 0
                 else:
                     sol_vector[item['id']] = 0
@@ -85,7 +90,7 @@ class TreeVisualizer:
         }
 
     def solve(self, initial_best_value=0):
-        print(f"\n--- STARTING BRANCH & BOUND (Capacity {self.capacity}, Binary Case) ---")
+        print(f"\n--- BRANCH & BOUND ---")
         self.best_value = initial_best_value
         
         root_data = self.precalc_node([])
@@ -93,12 +98,24 @@ class TreeVisualizer:
         if root_data:
             for k, v in root_data.items(): setattr(root, k, v)
         
-        stack = [root]
+        # USARE DEQUE PER BFS (CODA)
+        queue = deque([root])
         
-        while stack:
-            curr_node = stack.pop()
-            self.node_counter += 1
-            node_label = f"N{self.node_counter}"
+        # Contatori per etichette Pi,j
+        level_counters = defaultdict(int)
+        
+        while queue:
+            curr_node = queue.popleft() # PRENDI IL PRIMO (FIFO)
+            
+            # Etichettatura P_{i,j}
+            if curr_node.level == 0:
+                node_label = "P"
+                level_counters[0] = 1
+            else:
+                level_counters[curr_node.level] += 1
+                idx = level_counters[curr_node.level]
+                node_label = f"P_{{{curr_node.level},{idx}}}"
+
             indent = "    " * curr_node.level
             
             new_optimum_found = False
@@ -120,7 +137,7 @@ class TreeVisualizer:
                 if val == 0 or val == 1: vec_str_parts.append(f"x{item['id']}={int(val)}")
                 else: vec_str_parts.append(f"x{item['id']}={val:.2f}")
             
-            status_str = "FEASIBLE (Integer Solution)" if curr_node.is_integer else f"INFEASIBLE (Fractional on x{curr_node.split_item})"
+            status_str = "FEASIBLE (Integer)" if curr_node.is_integer else f"INFEASIBLE (Frac x{curr_node.split_item})"
             
             vec_str = ", ".join(vec_str_parts) + " -> " + f"{status_str}"
 
@@ -148,46 +165,118 @@ class TreeVisualizer:
 
             print(f"{indent}    -> ACTION: BRANCHING on x{curr_node.split_item}")
             
-            children = []
+            # Generazione figli
+            # PER ORDINE BFS E GRAFICO STANDARD: Genero prima x=0 (sinistra), poi x=1 (destra)
             
-            child_1_data = self.precalc_node(curr_node.taken + [(curr_node.split_item, 1)])
-            if child_1_data:
-                node_1 = Node(curr_node.level + 1, curr_node.taken + [(curr_node.split_item, 1)], f"x{curr_node.split_item}=1")
-                for k, v in child_1_data.items(): setattr(node_1, k, v)
-                children.append(node_1)
-
+            # Branch x_i = 0
             child_0_data = self.precalc_node(curr_node.taken + [(curr_node.split_item, 0)])
+            node_0 = None
             if child_0_data:
                 node_0 = Node(curr_node.level + 1, curr_node.taken + [(curr_node.split_item, 0)], f"x{curr_node.split_item}=0")
                 for k, v in child_0_data.items(): setattr(node_0, k, v)
-                children.append(node_0)
+
+            # Branch x_i = 1
+            child_1_data = self.precalc_node(curr_node.taken + [(curr_node.split_item, 1)])
+            node_1 = None
+            if child_1_data:
+                node_1 = Node(curr_node.level + 1, curr_node.taken + [(curr_node.split_item, 1)], f"x{curr_node.split_item}=1")
+                for k, v in child_1_data.items(): setattr(node_1, k, v)
             
-            if node_1: stack.append(node_1)
-            if node_0: stack.append(node_0)
+            # AGGIUNTA ALLA CODA (FIFO)
+            # Aggiungo prima 0 poi 1 così verranno visitati in quest'ordine nel prossimo livello
+            if node_0: queue.append(node_0)
+            if node_1: queue.append(node_1)
 
         return self.best_value
 
 class KnapsackProblem:
     def __init__(self, capacity, items):
         self.capacity = capacity
-        self.items = items
-        for item in self.items: item['r'] = item['v'] / item['p']
+        self.items = [i.copy() for i in items]
+        for item in self.items: 
+            item['r'] = item['v'] / item['p']
         self.items_sorted = sorted(self.items, key=lambda x: x['r'], reverse=True)
-        self.items_original_order = sorted(self.items, key=lambda x: x['id'])
+        self.items_by_id = sorted(self.items, key=lambda x: x['id'])
     
-    def solve_binary_greedy(self):
-        remaining_w = self.capacity; total_value = 0; solution = {}
+    def solve_binary_detailed(self):
+        print(f"\n" + "="*60)
+        print(f"INITIAL V_S, V_I: BINARY CASE (0/1)")
+        print(f"="*60)
+        
+        print(f"\n>>> 1. CALCULATING LOWER BOUND BINARY (GREEDY) v_I")
+        rem_w = self.capacity
+        val_greedy = 0
+        print(f"   Available Capacity: {rem_w}")
+        
         for item in self.items_sorted:
-            if item['p'] <= remaining_w: remaining_w -= item['p']; total_value += item['v']; solution[item['id']] = 1
-            else: solution[item['id']] = 0
-        return total_value, solution
-    
-    def solve_bin_rel(self):
-        rem_w = self.capacity; total_value = 0; solution = {}
+            print(f"   -> Item {item['id']} (v={item['v']}, p={item['p']}, r={item['r']:.2f}): ", end="")
+            
+            if item['p'] <= rem_w: 
+                rem_w -= item['p']
+                val_greedy += item['v']
+                print(f"TAKEN. (v_tot={val_greedy}, Rem. Cap={rem_w})")
+            else: 
+                print(f"DISCARDED. (Weight {item['p']} > Rem. Cap {rem_w})")
+        
+        print(f"   [RESULT] v_I (Binary) = {val_greedy}")
+
+        print(f"\n>>> 2. CALCULATING UPPER BOUND BINARY (RELAXED) v_S")
+        rem_w = self.capacity
+        val_relax = 0
+        
         for item in self.items_sorted:
-            if item['p'] <= rem_w: rem_w -= item['p']; total_value += item['v']; solution[item['id']] = 1
-            else: fraction = Fraction(int(rem_w), int(item['p'])); total_value += float(fraction) * item['v']; solution[item['id']] = fraction; rem_w = 0; break
-        return total_value, math.floor(total_value), solution
+            print(f"   -> Item {item['id']} (v={item['v']}, p={item['p']}): ", end="")
+            
+            if item['p'] <= rem_w: 
+                rem_w -= item['p']
+                val_relax += item['v']
+                print(f"TAKEN 1.0. (v_tot: {val_relax})")
+            else: 
+                fraction = rem_w / item['p']
+                added = fraction * item['v']
+                val_relax += added
+                print(f"TAKEN FRACTION: {rem_w} / {item['p']} = {fraction:.4f}")
+                print(f"      Calculation: {fraction:.4f} * {item['v']} = {added:.4f}")
+                print(f"      Capacity exhausted.")
+                break
+        
+        print(f"   [RESULT] v_S (Binary) = {val_relax:.2f}")
+        return val_greedy, val_relax
+
+    def solve_integer_detailed(self):
+        print(f"\n" + "="*60)
+        print(f"INITIAL V_S, V_I: INTEGER")
+        print(f"="*60)
+        print(f"we use the most efficient item.")
+        
+        best_item = self.items_sorted[0]
+        print(f"\n   Most Efficient Item (Basis): Item {best_item['id']} (v={best_item['v']}, p={best_item['p']}, r={best_item['r']:.4f})")
+        
+        print(f"\n>>> 1. CALCULATING UPPER BOUND INTEGER (RELAXED) v_S")
+        print(f"   Hypothesis: Fill knapsack entirely with Item {best_item['id']} (fractional).")
+        
+        count_frac = self.capacity / best_item['p']
+        val_relax = count_frac * best_item['v']
+        
+        print(f"   Copies calculation: Capacity {self.capacity} / Weight {best_item['p']} = {count_frac:.4f}")
+        print(f"   Value calculation: {count_frac:.4f} * {best_item['v']} = {val_relax:.4f}")
+        print(f"   [RESULT] v_S (Integer) = {val_relax:.2f}")
+
+        print(f"\n>>> 2. CALCULATING LOWER BOUND INTEGER (GREEDY) v_I")
+        
+        count_int = math.floor(count_frac)
+        val_int = count_int * best_item['v']
+        rem_cap = self.capacity - (count_int * best_item['p'])
+        
+        print(f"   Take only integer copies of Item {best_item['id']}: floor({count_frac:.4f}) = {count_int}")
+        print(f"   Value calculation: {count_int} * {best_item['v']} = {val_int}")
+        print(f"   Remaining capacity: {rem_cap}")
+        for item in self.items:
+            if item['p'] < rem_cap:
+                print(f"  Can also take item {item["id"]} (cap = {item['p']}): {val_int}  + {item['v']} = {val_int  + item['v']}")
+
+        
+        return val_int, val_relax
 
 class GomoryKnapsackInteger:
     def __init__(self, capacity, items):
@@ -203,32 +292,10 @@ class GomoryKnapsackInteger:
         best_item = self.items_sorted[0]
         base_id = best_item['id']
         base_w = best_item['p']
-        base_v = best_item['v']
-        
-        print(f"Most efficient item (Basis): Item {base_id} (v={base_v}, p={base_w}, r={best_item['r']:.4f})")
         
         val_x_base = self.capacity / base_w
-        opt_relaxed_val = val_x_base * base_v
         
-        print(f"\n--- RELAXED SOLUTION ---")
-        print(f"x{base_id} = {self.capacity} / {base_w} = {val_x_base:.2f}")
-        for item in self.items_by_id:
-            if item['id'] != base_id:
-                print(f"x{item['id']} = 0")
-        
-        print(f"v_S(P) (Relaxed Value) = {opt_relaxed_val:.2f}")
-        
-        qty_int = math.floor(val_x_base)
-        opt_int_val = qty_int * base_v
-        rem_cap = self.capacity - (qty_int * base_w)
-        
-        print(f"\n--- FEASIBLE SOLUTION (Lower Bound) ---")
-        print(f"x{base_id} = {qty_int} (integers)")
-        print(f"Remaining capacity: {rem_cap}")
-        print(f"v_I(P) (Integer Basis Value) = {opt_int_val}")
-        
-        print(f"\n--- GOMORY CUT GENERATION ---")
-        print(f"Optimal row equation (Basis x{base_id}):")
+        print(f"\n--- GOMORY CUT GENERATION (Basis x{base_id}) ---")
         
         rhs_frac = Fraction(int(self.capacity), int(base_w))
         f0 = rhs_frac - math.floor(rhs_frac)
@@ -269,7 +336,6 @@ class GomoryKnapsackInteger:
             cut_int_terms.append(f"{int_val}{name}")
             
         rhs_int = int(f0 * base_w)
-        
         cut_str_int = " + ".join(cut_int_terms)
         print(f"{cut_str_int} >= {rhs_int}")
 
@@ -296,31 +362,36 @@ def load_data(filename):
     return capacity, items
 
 def check_coincidence(items):
-    print("EXAMPLE WHERE BINARY OPTIMUM == INTEGER OPTIMUM?")
+    print(f"\n" + "="*60)
+    print("CHECK COINCIDENCE (Binary Optimum vs Integer Optimum)")
+    print(f"="*60)
     
     best_item = max(items, key=lambda x: x['v']/x['p'])
     test_cap = int(best_item['p'])
 
-    print(f"Using capacity = weight of most efficient Item {best_item['id']}: {test_cap}")
+    print(f"Testing with Capacity = weight of Item {best_item['id']} ({test_cap})")
     
-    print(f"\n1) Binary Case (Capacity {test_cap}):")
     kp_bin = KnapsackProblem(test_cap, items)
-    val_greedy, _ = kp_bin.solve_binary_greedy()
-    solver_bin = TreeVisualizer(test_cap, items)
-    solver_bin.solve(initial_best_value=val_greedy)
-    bin_opt = solver_bin.best_value
-    print(f">>> Binary opt: {int(bin_opt)}")
+    print("\n--- Binary Case ---")
+    val_greedy, _ = kp_bin.solve_binary_detailed()
     
-    print(f"\n2) Integer Case (Capacity {test_cap}):")
+    solver_bin = TreeVisualizer(test_cap, items)
+    sys.stdout = open(os.devnull, 'w')
+    solver_bin.solve(initial_best_value=val_greedy)
+    sys.stdout = sys.__stdout__
+    
+    bin_opt = solver_bin.best_value
+    print(f"   >>> Binary Optimum: {int(bin_opt)}")
+    
     int_opt = best_item['v']
-    print(f"Item {best_item['id']} has max efficiency.")
-    print(f"With capacity {test_cap}, we can fit exactly 1 unit.")
-    print(f">>> Integer Optimum: {int(int_opt)}")
+    print(f"\n--- Integer Case ---")
+    print(f"   With capacity {test_cap}, we can take exactly 1 unit of Item {best_item['id']}.")
+    print(f"   >>> Integer Optimum: {int(int_opt)}")
     
     if bin_opt == int_opt:
-        print("\nOK, Solutions coincide.")
+        print("\n[OK] Solutions coincide.")
     else:
-        print("\nNot equal.")
+        print("\n[DIFF] Solutions do not coincide.")
 
 def main():
     filename = 'knapsack.txt'
@@ -328,40 +399,23 @@ def main():
     
     capacity, items = load_data(filename)
     
-    kp_bin = KnapsackProblem(capacity, items)
+    kp = KnapsackProblem(capacity, items)
     
     print(">>> Item Details (v, p, ratio):")
-    for item in kp_bin.items_sorted:
-        v_int = int(item['v'])
-        p_int = int(item['p'])
-        ratio_float = item['r']
-        print(f"    Item {item['id']}: v={v_int}, p={p_int}, r={ratio_float:.2f}")
+    for item in kp.items_sorted:
+        print(f"    Item {item['id']}: v={int(item['v'])}, p={int(item['p'])}, r={item['r']:.2f}")
 
-    print("\n=== 1. PRE-PROCESSING ===")
-    
-    lower_value_bin, greedy_sol_bin = kp_bin.solve_binary_greedy()
-    print(f"Lower Bound (Greedy) v_I = {int(lower_value_bin)}")
-    
-    upper_exact_bin, upper_floor_bin, rel_sol_bin = kp_bin.solve_bin_rel()
-    print(f"Upper Bound (Relax) v_S = {upper_exact_bin:.2f}")
+    bin_lower, bin_upper = kp.solve_binary_detailed()
+    int_lower, int_upper = kp.solve_integer_detailed()
 
-    print("\n" + "="*50)
-    print(f"BINARY CASE (Capacity {capacity})")
-    print("="*50)
-    
     solver_bin = TreeVisualizer(capacity, items)
-    solver_bin.solve(initial_best_value=lower_value_bin)
+    solver_bin.solve(initial_best_value=bin_lower)
     print(f"\n>>> Binary Optimum found: {int(solver_bin.best_value)}")
     
-    print("\n" + "="*50)
-    print("INTEGER PROBLEM, GOMORY CUT")
-    print("="*50)
-    
     try:
-        user_cap_str = input("Enter capacity for integer case: ").strip()
+        user_cap_str = input("\nDo you want to change capacity for the Integer case? (Press Enter to keep " + str(int(capacity)) + "): ").strip()
         capacity_int = int(user_cap_str) if user_cap_str else int(capacity)
     except ValueError:
-        print(f"Invalid input, using {capacity}.")
         capacity_int = int(capacity)
 
     gomory_solver = GomoryKnapsackInteger(capacity_int, items)

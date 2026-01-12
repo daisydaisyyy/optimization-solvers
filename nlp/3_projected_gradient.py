@@ -117,7 +117,21 @@ def parse_pnl_linear(filename):
         g_list = g_str.split(',')
         for g in g_list:
             if not g.strip(): continue
-            expr = sp.sympify(g.strip().replace('^', '**'), locals=local_dict)
+            raw_g = g.strip().replace('^', '**')
+            
+            # handle standard inequalities to normalize to expression <= 0
+            if '<=' in raw_g:
+                lhs, rhs = raw_g.split('<=')
+                # LHS <= RHS  -->  LHS - RHS <= 0
+                expr = sp.sympify(lhs, locals=local_dict) - sp.sympify(rhs, locals=local_dict)
+            elif '>=' in raw_g:
+                lhs, rhs = raw_g.split('>=')
+                # LHS >= RHS  -->  RHS - LHS <= 0
+                expr = sp.sympify(rhs, locals=local_dict) - sp.sympify(lhs, locals=local_dict)
+            else:
+                # <= 0 if no operator found
+                expr = sp.sympify(raw_g, locals=local_dict)
+
             coeffs = expr.as_coefficients_dict()
             const = float(coeffs.get(1, 0)) 
             
@@ -324,13 +338,22 @@ def projected_gradient(filename='pnl.txt'):
                     print("-" * 30)
                     continue
             else:
-                print(f"\n[5] d^{k} != 0 -> find t:")
+                print(f"\n[5] d^{k} != 0 -> find t^{k}:")
+                print(f"    Parametric Ray x(t) = x^{k} + t * d^{k}:")
+                for i_var, var_sym in enumerate(vars_sym):
+                    start_val = fmt_frac(xk[i_var])
+                    slope_val = fmt_frac(dk[i_var])
+                    print(f"      {var_sym}(t) = {start_val} + t * ({slope_val})")
+
                 max_t = float('inf')
-                ad = np.dot(A, dk)
-                b_ax = b - np.dot(A, xk)
+                ad = np.dot(A, dk)       # Slope (A * d)
+                b_ax = b - np.dot(A, xk) # Slack attuale (b - A * x)
                 has_limit = False
 
+                print(f"\n    Constraint Analysis (Substitute x(t) into g_i):")
+                
                 for i in range(len(b)):
+                    # Ricostruzione stringa del vincolo per leggibilità
                     row_str_parts = []
                     for j, v in enumerate(vars_sym):
                         c = A[i][j]
@@ -341,26 +364,37 @@ def projected_gradient(filename='pnl.txt'):
                             term = f"{v}" if val_str == "1" else f"{val_str}*{v}"
                             row_str_parts.append(f"{prefix}{term}")
                     lhs_str = "".join(row_str_parts) if row_str_parts else "0"
-                    constr_desc = f"{lhs_str} <= {fmt_frac(b[i])}"
                     
-                    den = ad[i]
-                    num = b_ax[i]
+                    # Logica calcolo t
+                    den = ad[i]      # Termine che moltiplica t
+                    num = b_ax[i]    # Termine noto
+                    val_lhs_curr = np.dot(A[i], xk) # Valore attuale del vincolo in xk
+
+                    print(f"    [g_{i}] {lhs_str} <= {fmt_frac(b[i])}")
+                    
+                    # Stampa esplicita della sostituzione
+                    # A(x + td) <= b  =>  Ax + t(Ad) <= b
+                    print(f"       Subst:  {fmt_frac(val_lhs_curr)} + t*({fmt_frac(den)}) <= {fmt_frac(b[i])}")
                     
                     status_msg = ""
                     if abs(den) < 1e-9:
-                         status_msg = "true for all t"
+                         status_msg = "       -> Slope 0 (Independent of t). Always True."
                     elif den > 0:
+                         # t * den <= num  ->  t <= num/den
                          lim = num/den
-                         status_msg = f"true if t <= {fmt_frac(lim)}"
+                         lim_str = fmt_frac(lim)
+                         status_msg = f"       -> {fmt_frac(den)}*t <= {fmt_frac(num)}  =>  t <= {lim_str}"
                          if lim < max_t: max_t = lim; has_limit = True
                     else: # den < 0
+                         # t * den <= num  ->  t >= num/den (il segno cambia dividendo per negativo)
                          lim = num/den
-                         status_msg = f"true if t >= {fmt_frac(lim)}"
+                         lim_str = fmt_frac(lim)
+                         status_msg = f"       -> {fmt_frac(den)}*t <= {fmt_frac(num)}  =>  t >= {lim_str} (Lower bound, ignored)"
                     
-                    print(f"    {constr_desc:<35} {status_msg}")
+                    print(status_msg)
                 
                 max_t_str = "inf" if not has_limit else fmt_frac(max_t)
-                print(f"\n    -> t_hat = {max_t_str}")
+                print(f"\n    -> max t: t^{k} = {max_t_str}")
 
                 calc_bound = max_t if has_limit else 100.0
                 print(f"[6] Exact Line Search on [0, {max_t_str}]:")
@@ -368,11 +402,11 @@ def projected_gradient(filename='pnl.txt'):
                 tk = analytic_line_search_bounded(f_sym, vars_sym, xk, dk, calc_bound, is_max)
                 if abs(tk - round(tk)) < 1e-9: tk = float(round(tk))
                 
-                print(f"    -> Optimal step t* = {fmt_frac(tk)}")
+                print(f"    -> Optimal step t^{k} = {fmt_frac(tk)}")
                 
                 xk_next = xk + tk * dk
                 print(f"[7] New point x^{k+1}:")
-                print(f"     x^{k+1} = x^{k} + t* d^{k}")
+                print(f"     x^{k+1} = x^{k} + t^{k}* d^{k}")
                 coords = []
                 for i in range(n_vars):
                     term = f"{fmt_frac(xk[i])} + {fmt_frac(tk)}*({fmt_frac(dk[i])})"

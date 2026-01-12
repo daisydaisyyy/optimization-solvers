@@ -42,7 +42,22 @@ def parsing(filename):
         g_list = g_str.split(',')
         for g in g_list:
             if not g.strip(): continue
-            expr = sp.sympify(g.strip().replace('^', '**'), locals=local_dict)
+            
+            raw_g = g.strip().replace('^', '**')
+            
+            # handle standard inequalities to normalize to expression <= 0
+            if '<=' in raw_g:
+                lhs, rhs = raw_g.split('<=')
+                # LHS <= RHS  -->  LHS - RHS <= 0
+                expr = sp.sympify(lhs, locals=local_dict) - sp.sympify(rhs, locals=local_dict)
+            elif '>=' in raw_g:
+                lhs, rhs = raw_g.split('>=')
+                # LHS >= RHS  -->  RHS - LHS <= 0
+                expr = sp.sympify(rhs, locals=local_dict) - sp.sympify(lhs, locals=local_dict)
+            else:
+                # <= 0 if no operator found
+                expr = sp.sympify(raw_g, locals=local_dict)
+
             coeffs = expr.as_coefficients_dict()
             const = float(coeffs.get(1, 0)) 
             
@@ -97,7 +112,7 @@ def find_opt_step_min(f_sym, vars_sym, xk, direction):
     
     phi_expanded = sp.expand(phi_t)
     phi_disp = sp.nsimplify(phi_expanded, tolerance=1e-8, rational=True)
-    print(f"   a) φ(t) = f(x_k + t*d_k):")
+    print(f"   a) φ(t) = f(x^k + t^k*d^k):")
     print(f"      {phi_disp}")
     
     d_phi = sp.diff(phi_t, t)
@@ -172,7 +187,7 @@ def find_opt_step_max(f_sym, vars_sym, xk, direction):
     
     phi_expanded = sp.expand(phi_t)
     phi_disp = sp.nsimplify(phi_expanded, tolerance=1e-8, rational=True)
-    print(f"   a) φ(t) = f(x_k + t*d_k):")
+    print(f"   a) φ(t) = f(x^k + t^k*d^k):")
     print(f"      {phi_disp}")
     
     d_phi = sp.diff(phi_t, t)
@@ -296,12 +311,12 @@ def frank_wolfe_min(f_expr, A, b, xk, vars_sym, max_iter):
         
         if abs(tk - 1.0) < 1e-9: tk = 1.0
         if abs(tk) < 1e-9: tk = 0.0
-        
-        print(f"   -> OPT STEP (t): {tk}")
+        tk_frac = str(Fraction(tk).limit_denominator(1000))
+        print(f"   -> OPT STEP (t): {tk} -> {tk_frac}")
 
         # 6. update new point
         xk_next = xk + tk * direction
-        print(f"6) NEW POINT x{k+1} = x{k} + t*d:")
+        print(f"6) NEW POINT x^{k+1} = x^{k} + t^{k}*d^{k}:")
         
         t_frac = Fraction(tk).limit_denominator(1000)
         for i, var_name in enumerate(vars_sym):
@@ -310,7 +325,7 @@ def frank_wolfe_min(f_expr, A, b, xk, vars_sym, max_iter):
             res_frac = Fraction(xk_next[i]).limit_denominator(1000)
             print(f"   Comp. {var_name}: {x_old_frac} + {t_frac} * ({d_frac}) = {res_frac}")
             
-        print(f"   -> x{k+1} = {fmt_vec_frac(xk_next)}")
+        print(f"   -> x^{k+1} = {fmt_vec_frac(xk_next)}")
         
         xk = xk_next
         print("-" * 60)
@@ -371,12 +386,12 @@ def frank_wolfe_max(f_expr, A, b, xk, vars_sym, max_iter):
         
         if abs(tk - 1.0) < 1e-9: tk = 1.0
         if abs(tk) < 1e-9: tk = 0.0
-        
-        print(f"   -> OPT STEP (t): {tk}")
+        tk_frac = str(Fraction(tk).limit_denominator(1000))
+        print(f"   -> OPT STEP (t): {tk} -> {tk_frac}")
 
         # 6. update new point
         xk_next = xk + tk * direction
-        print(f"6) NEW POINT x{k+1} = x{k} + t*d:")
+        print(f"6) NEW POINT x{k+1} = x^{k} + t^{k}*d^{k }:")
         
         t_frac = Fraction(tk).limit_denominator(1000)
         for i, var_name in enumerate(vars_sym):

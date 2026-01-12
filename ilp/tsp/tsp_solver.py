@@ -216,6 +216,10 @@ class TSPSolver:
         print("     NO. The 1-tree is usually a better (tighter) bound for the symmetric TSP.")
 
     def bb_recursive(self, inc, exc, var_index, name):
+        if self.check_infeasibility(inc):
+            print(f"\n[{name}]")
+            print(f"   >>> PRUNED (Infeasible: Subtour or Degree > 2)")
+            return
         lb, edges = self.calculate_n_tree_hub(inc, exc, self.hub_node)
         edges_str = " ".join([f"({u},{v})" for u, v in sorted(edges)])
 
@@ -296,6 +300,41 @@ class TSPSolver:
         except:
             return "Path Error"
 
+    def check_infeasibility(self, included_edges):
+        deg = {n: 0 for n in self.nodes}
+        adj = {n: [] for n in self.nodes}
+        for u, v in included_edges:
+            deg[u] += 1; deg[v] += 1
+            adj[u].append(v); adj[v].append(u)
+        
+        if any(d > 2 for d in deg.values()):
+            return True # not adm for degree
+            
+        visited = set()
+        for n in self.nodes:
+            if n in visited or deg[n] < 2: 
+                continue # if degree < 2 can't be in a cycle for now
+            
+            component = []
+            stack = [n]
+            visited_subset = {n}
+            while stack:
+                curr = stack.pop()
+                component.append(curr)
+                visited.add(curr)
+                for neighbor in adj[curr]:
+                    if neighbor not in visited_subset:
+                        visited_subset.add(neighbor)
+                        stack.append(neighbor)
+            
+            # if all nodes in connected component have degree  = 2 -> cycle!
+            # if len < total nodes -> subtour is not ammissible
+            is_cycle = all(deg[x] == 2 for x in component)
+            if is_cycle and len(component) < self.num_nodes:
+                return True
+                
+        return False
+    
     def solve(self):
         
         try:

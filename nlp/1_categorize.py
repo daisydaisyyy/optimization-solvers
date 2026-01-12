@@ -2,8 +2,7 @@ import sympy as sp
 import pandas as pd
 import numpy as np
 import sys
-
-def parse_pnl_file(filename):
+def parse(filename):
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
@@ -30,12 +29,17 @@ def parse_pnl_file(filename):
     if g_str:
         for g in g_str.split(','):
             if g.strip():
-                g_exprs.append(sp.sympify(g.strip().replace('^', '**'), locals=local_dict))
+                raw_expr = sp.sympify(g.strip().replace('^', '**'), locals=local_dict)
+                
+                if hasattr(raw_expr, 'lhs') and hasattr(raw_expr, 'rhs'):
+                    g_exprs.append(raw_expr.lhs - raw_expr.rhs)
+                else:
+                    g_exprs.append(raw_expr)
 
     return f_expr, g_exprs, vars_sym, is_max
 
-def run_categorize():
-    f_sym, g_syms, vars_sym, is_max = parse_pnl_file('pnl.txt')
+def solve():
+    f_sym, g_syms, vars_sym, is_max = parse('pnl.txt')
     
     # setup Lagrangian
     lams_sym = list(sp.symbols(f'λ_0:{len(g_syms)}'))
@@ -229,4 +233,4 @@ def run_categorize():
     print("="*80)
 
 if __name__ == "__main__":
-    run_categorize()
+    solve()
