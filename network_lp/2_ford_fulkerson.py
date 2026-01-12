@@ -48,7 +48,6 @@ def max_flow_min_cut(capacity_graph, s, t, nodes):
     flow_values = defaultdict(lambda: defaultdict(int))
     residual_graph = defaultdict(lambda: defaultdict(int))
     
-    # Sort edges for consistent vector output
     all_edges = []
     for u in sorted(capacity_graph.keys()):
         for v in sorted(capacity_graph[u].keys()):
@@ -74,7 +73,6 @@ def max_flow_min_cut(capacity_graph, s, t, nodes):
         path.reverse()
         path_str = " -> ".join([str(s)] + [str(v) for u, v in path])
         
-        # Capture values for calculation string BEFORE update
         previous_flow = max_flow
         max_flow += path_flow 
         calculation_str = f"{previous_flow} + {path_flow} = {max_flow}"
@@ -107,46 +105,71 @@ def max_flow_min_cut(capacity_graph, s, t, nodes):
             for v_node in capacity_graph.get(u_node, {}):
                 current_flow_snapshot[(u_node, v_node)] = flow_values[u_node][v_node]
         
-        # Create vector string x=(...)
         vector_values = []
+        res_values = []
+        
         for u_edge, v_edge in all_edges:
+            # Flow
             val = flow_values[u_edge][v_edge]
             vector_values.append(str(val))
+            
+            # Residual (on the original forward edge)
+            res_val = residual_graph[u_edge][v_edge]
+            res_values.append(str(res_val))
+
         vector_str = "x = ( " + "  ".join(vector_values) + " )"
+        res_vector_str = "r = ( " + "  ".join(res_values) + " )"
 
         iteration_details.append({
             'iteration': iteration,
             'path': path_str,
             'path_flow': path_flow,
             'current_max_flow': max_flow,
-            'calculation_str': calculation_str, # Added specific calculation string
+            'calculation_str': calculation_str,
             'changes': changes,
             'parent_vector': parent.copy(),
             'flow_snapshot': current_flow_snapshot,
             'vector_str': vector_str,
+            'res_vector_str': res_vector_str,
             'all_edges': all_edges
         })
         iteration += 1
 
+    termination_log = []
+    termination_log.append("\nEDMONDS-KARP HAS STOPPED :)")
+    
     set_A = set()
     queue = deque([s])
     visited_cut = {node: False for node in nodes}
     visited_cut[s] = True
+    
+    termination_log.append(f"     -> Start at Node {s}")
+    
     while queue:
         u = queue.popleft()
         set_A.add(u)
-        for v in nodes:
-            if not visited_cut.get(v) and residual_graph[u][v] > 0:
+        neighbors = sorted(residual_graph[u].keys())
+        
+        for v in neighbors:
+            res_cap = residual_graph[u][v]
+            if not visited_cut.get(v) and res_cap > 0:
                 visited_cut[v] = True
                 queue.append(v)
+                termination_log.append(f"     -> Visiting Node {v} from {u} (Residual Cap: {res_cap} > 0)")
+            elif not visited_cut.get(v) and res_cap == 0:
+                pass 
+    
     set_B = set(nodes) - set_A
+    termination_log.append(f"   N_s (Reachable): {sorted(list(set_A))}")
+    termination_log.append(f"   N_t (Unreachable): {sorted(list(set_B))}")
+    
     min_cut_arcs = []
     for u in set_A:
         for v in set_B:
             if v in capacity_graph.get(u, {}):
                 min_cut_arcs.append(((u, v), capacity_graph[u][v]))
                 
-    return max_flow, set_A, set_B, min_cut_arcs, iteration_details
+    return max_flow, set_A, set_B, min_cut_arcs, iteration_details, "\n".join(termination_log)
 
 def run_max_flow_analysis(file_path):
     capacity_graph, nodes = parse_graph_for_max_flow(file_path)
@@ -176,7 +199,7 @@ def run_max_flow_analysis(file_path):
     if s == t:
          return "Error: Source and sink cannot be the same."
 
-    max_flow, set_A, set_B, min_cut_arcs, iteration_details = max_flow_min_cut(capacity_graph, s, t, nodes)
+    max_flow, set_A, set_B, min_cut_arcs, iteration_details, termination_log = max_flow_min_cut(capacity_graph, s, t, nodes)
     
     output = ""
     
@@ -199,16 +222,25 @@ def run_max_flow_analysis(file_path):
             header_str = "      " + " ".join(edge_headers)
             output += f"\n{header_str}"
             output += f"\n{detail['vector_str']}"
+            output += f"\n{detail['res_vector_str']} (Residual Capacities)"
 
-    output += f"\n\n2. FINAL RESULTS"
+    output += f"\n{termination_log}"
+
+    output += f"\n\n" + "="*60
+    output += f"\nFINAL RESULTS"
+    output += f"\n" + "="*60
     output += f"\nMax Flow = {max_flow}"
-    
+
+    if iteration_details:
+         s_fake = f"\nflow with fake edge added: \n{detail['vector_str'][:-1]}, {max_flow})"
+         output += s_fake
+
     cut_capacity = sum(cap for edge, cap in min_cut_arcs)
-    output += f"\n--- Min Cut (Max-Flow Min-Cut Theorem): ---"
+    output += f"\n\n--- Min Cut (Max-Flow Min-Cut Theorem): ---"
     output += f"\nMin Cut Capacity = {cut_capacity}"
-    output += f"\nNode partition (A|B): A={sorted(list(set_A))} | B={sorted(list(set_B))}"
+    output += f"\nNode partition (N_s|N_t): N_s={sorted(list(set_A))} | N_t={sorted(list(set_B))}"
     
-    output += "\nEdges in Min Cut (from A to B):"
+    output += "\nEdges in Min Cut (from N_s to N_t):"
     if not min_cut_arcs:
         output += "\n- None"
     else:

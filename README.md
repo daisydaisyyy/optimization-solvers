@@ -4,13 +4,12 @@ Python scripts to solve optimization problems step by step, covering linear, int
 
 **Linear Programming (LP):**
 - Compute the initial basis for the simplex algorithm given a specific point
-- Simplex algorithm
-- Find the optimal solution
-- Generate Gomory cuts for integer solutions
+- Simplex algorithm, optimal solution
+- Gomory cuts to find integer solutions
 
 **Network Linear Programming:**
 - Compute flow and potential given a T, L, U partition
-- Network Simplex algorithm
+- Simplex algorithm applied to capacitated networks
 - Dijkstra (shortest path tree)
 - Max-Flow / Min-Cut: find max flow and the corresponding min-cut
 
@@ -21,5 +20,5 @@ Python scripts to solve optimization problems step by step, covering linear, int
 
 **Non-Linear Programming (NLP):**
 - Stationary points categorization
-- Projected Gradient Method (PG)
+- Projected gradient method
 - Karush-Kuhn-Tucker conditions (KKT)
