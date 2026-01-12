@@ -278,22 +278,39 @@ def solve():
 
         l_floats = [float(l) for l in l_vals]
         
-        is_mL = all(l >= -1e-7 for l in l_floats) and all(e > -1e-7 for e in hessian_eig)
-        is_ML = all(l <= 1e-7 for l in l_floats) and all(e < 1e-7 for e in hessian_eig)
-        is_S = not (is_mL or is_ML)
+        l_positive = all(l >= -1e-7 for l in l_floats)
+        l_negative = all(l <= 1e-7 for l in l_floats)
+        
+        has_active_constraints = any(abs(l) > 1e-7 for l in l_floats)
+        
+        is_mL = False
+        if l_positive:
+            if not has_active_constraints:
+                if all(e > -1e-7 for e in hessian_eig): is_mL = True
+            else:
+                is_mL = True
 
-        if any(e > 1e-7 for e in hessian_eig) and any(e < -1e-7 for e in hessian_eig):
-            is_mL = False
-            is_ML = False
-            is_S = True
+        is_ML = False
+        if l_negative:
+            if not has_active_constraints:
+                if all(e < 1e-7 for e in hessian_eig): is_ML = True
+            else:
+                is_ML = True
+
+        is_S = not (is_mL or is_ML)
+        
+        if is_mL and is_ML:
+             is_S = True
+             is_mL = False
+             is_ML = False
 
         print(f"\n       e) Conclusion Logic:")
         if is_mL:
-            print("          Eigenvalues >= 0 (Positive Semidefinite) AND λ suitable -> Local MINIMUM")
+            print("          Candidate for Local MINIMUM (all λ >= 0).")
         elif is_ML:
-            print("          Eigenvalues <= 0 (Negative Semidefinite) AND λ suitable -> Local MAXIMUM")
+            print("          Candidate for Local MAXIMUM (all λ <= 0).")
         else:
-            print("          Mixed eigenvalues (Indefinite) -> SADDLE POINT")
+            print("          Indefinite / Saddle Point.")
 
         table_rows.append({
             'x_fmt': x_lbl.replace('(', '').replace(')', '').replace(' ', ''),
