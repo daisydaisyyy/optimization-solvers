@@ -197,7 +197,9 @@ def search_exact_step(f_sym, vars_sym, xk, direction, max_step, is_max):
         for s in sol:
             try:
                 val_t = float(s)
-                print(f"        -> Found stationary point t* = {fmt_frac(val_t)}")
+                print(f"        -> Found stationary point t* (= STEP) = {fmt_frac(val_t)}")
+                if val_t < 0:
+                    print(f"            !! t* < 0 -> t = STEP = 1 !!")
                 sol_candidates.append(val_t)
                 candidates.append(val_t)
             except: pass
@@ -451,7 +453,7 @@ def projected_gradient(filename='pnl.txt'):
                 tk = search_exact_step(f_sym, vars_sym, xk, dk, calc_bound, is_max)
                 if abs(tk - round(tk)) < 1e-9: tk = float(round(tk))
                 
-                print(f"    -> Optimal step t^{k} = {fmt_frac(tk)}")
+                print(f"    -> MAX MOVEMENT t^{k} = {fmt_frac(tk)}")
                 
                 xk_next = xk + tk * dk
                 print(f"[7] New point x^{k+1}:")
@@ -461,7 +463,7 @@ def projected_gradient(filename='pnl.txt'):
                     term = f"{fmt_frac(xk[i])} + {fmt_frac(tk)}*({fmt_frac(dk[i])})"
                     res = fmt_frac(xk_next[i])
                     coords.append(f"{term} = {res}")
-                print(f"    {',\t\t'.join(coords)}")
+                print(f"    {',    '.join(coords)}")
                 print(f"    x^{k+1} = {fmt_vec_frac(xk_next)}")
                 print("-" * 60)
                 xk = xk_next
