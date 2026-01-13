@@ -190,7 +190,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
 
     try:
         W_full = -1 * np.linalg.inv(A_B)
-        log("\n" + format_matrix(W_full, "W (A_B^-1)"))
+        log("\n" + format_matrix(W_full, "W = -(A_B^-1)"))
     except np.linalg.LinAlgError:
         log("\nW is a singular matrix.")
     
@@ -219,6 +219,7 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         
         # consider only den > 0 (we are moving towards the constraint)
         if den <= 1e-9:
+            print(f"  A_{con['id']} W_{h_id} = {con['A']} {w_vec} = {den} < 0")
             continue
         
         r_val = slack / den
@@ -226,13 +227,13 @@ def solve_step(c, x_curr, basis_ids, constraints, step_num=1):
         
         cid = con['id']
         # (b_i - A_i x) / (A_i w_h)
-        b_str = f"{con['b']:.4f}".rstrip('0').rstrip('.')
-        Ax_str = f"{Ax_val:.4f}"
-        den_str = f"{den:.4f}"
+        b_str = f"{con['b']:.2f}".rstrip('0').rstrip('.')
+        Ax_str = f"{Ax_val:.2f}"
+        den_str = f"{den:.2f}"
         
-        expanded_calc = f"({b_str} - {Ax_str}) / {den_str}"
+        expanded_calc = f"(b_{cid} - A_{cid} x)/(A_{cid} W_{h_id}) = ({b_str} - {Ax_str}) / {den_str}"
         
-        log(f"  theta_{cid} = {expanded_calc} = {theta_str}")
+        log(f"  θ_{cid} = {expanded_calc} = {theta_str}")
         
         if r_val < -1e-9: continue 
 

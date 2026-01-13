@@ -1,5 +1,6 @@
 import sys
-
+from scipy.optimize import linear_sum_assignment
+import numpy as np
 class TSPSolver:
     def __init__(self, filename):
         self.matrix = {}
@@ -197,7 +198,7 @@ class TSPSolver:
         else:
             return float('inf'), []
 
-    def analyze_constraints(self, edges):
+    def analyze_constraints(self, edges, cur_lb):
         deg = {n: 0 for n in self.nodes}
         for u, v in edges:
             deg[u] += 1
@@ -213,7 +214,36 @@ class TSPSolver:
             print("   - No constraints violated (the 1-tree is a cycle).")
 
         print("   - Question: Is minimum cost assignment a better evaluation?")
-        print("     NO. The 1-tree is usually a better (tighter) bound for the symmetric TSP.")
+        
+        try:
+            
+            
+            n_dim = len(self.nodes)
+            node_map = {node: i for i, node in enumerate(self.nodes)}
+            
+            cost_matrix = np.full((n_dim, n_dim), float('inf'))
+            
+            for u in self.nodes:
+                if u in self.matrix:
+                    for v, cost in self.matrix[u].items():
+                        i, j = node_map[u], node_map[v]
+                        cost_matrix[i][j] = cost
+            
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            v_ap = cost_matrix[row_ind, col_ind].sum()
+            
+            print(f"     Calculated assignment problem v_I = {v_ap}")
+            print(f"     Current {self.hub_node}-tree Lower Bound (v_I) = {cur_lb}")
+            
+            if v_ap > cur_lb:
+                print("     YES. v_I (assignment) > v_I (tsp).")
+            elif v_ap == cur_lb:
+                 print("     EQUAL. Both bounds give the same value.")
+            else:
+                print("     NO.  v_I (assignment) < v_I (tsp).")
+
+        except Exception as e:
+            print(f"     [Error calculating AP: {e}]")
 
     def bb_recursive(self, inc, exc, var_index, name):
         if self.check_infeasibility(inc):
@@ -228,7 +258,7 @@ class TSPSolver:
         print(f"   LB = v_I = {lb}")
 
         if lb >= self.global_ub:
-            print(f"   >>> PRUNED (LB = v_I = {lb} >= UB = v_S = {self.global_ub})")
+            print(f"   >>> PRUNED (LB = v_I = {lb} >= UB = v_S = {self.global_ub}) -> [{lb},{self.global_ub}]")
             return
 
         if self.is_tour(edges):
@@ -236,12 +266,12 @@ class TSPSolver:
             if lb < self.global_ub:
                 self.global_ub = lb
                 self.best_solution_edges = edges 
-                print(f"   *** NEW OPTIMUM (UB) = {self.global_ub} ***")
+                print(f"   *** NEW OPTIMUM (UB) = {self.global_ub} *** -> [{self.global_ub},{self.global_ub}]")
             return
 
         if var_index < len(self.branching_vars):
             u, v = self.branching_vars[var_index]
-            print(f"   -> Branch on variable x_{u}{v}")
+            print(f"   -> Branch on variable x_{u}{v} -> [{lb},{self.global_ub}]")
             self.bb_recursive(inc, exc + [(u, v)], var_index + 1, f"{name} -> x{u}{v}=0")
             self.bb_recursive(inc + [(u, v)], exc, var_index + 1, f"{name} -> x{u}{v}=1")
 
@@ -357,7 +387,7 @@ class TSPSolver:
         edges_str = " ".join([f"( {u} , {v} )" for u, v in sorted(edges_root)])
         print(f"\na) {self.hub_node}-tree: {edges_str}")
         print(f"   v_I(P) = {lb_root}")
-        self.analyze_constraints(edges_root)
+        self.analyze_constraints(edges_root, lb_root)
 
         # b) heuristic cycle: find upper bound (v_S)
         ub, path = self.nearest_neighbor(start_cycle)

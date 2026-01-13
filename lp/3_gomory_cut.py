@@ -101,7 +101,7 @@ def solve_gomory(A, b, signs, c, sense):
         print("Optimal solution not found.")
         return
 
-    names_list = [f"x{i+1}" for i in range(n)] + [f"s{i+1}" for i in range(m)]
+    names_list = [f"x_{i+1}" for i in range(n)] + [f"x_{n+(i+1)}" for i in range(m)]
     vars_gurobi = [x[i] for i in range(n)] + [s[i] for i in range(m)]
     
     basis_idxs = []
@@ -113,6 +113,10 @@ def solve_gomory(A, b, signs, c, sense):
         else:
             non_basis_idxs.append(idx)
             
+    basis_idx_print = [i + 1 for i in basis_idxs]
+    
+    print(f"\nOPT BASIS FOR GOMORY = {{{', '.join(map(str, basis_idx_print))}}}")
+    
     S_mat = np.zeros((m, m))
     for i, sign in enumerate(signs):
         if sign == '<=': S_mat[i, i] = 1.0
@@ -131,11 +135,7 @@ def solve_gomory(A, b, signs, c, sense):
     except Exception as e:
         print("Matrix Error:", e)
         return
-
-    print("\n" + "="*60)
-    print("      A~")
-    print("="*60)
-
+    
     print("\n[1] A_B^-1:")
     for row in A_B_inv:
         print("  " + "  ".join([f"{format_frac(v):>8}" for v in row]))

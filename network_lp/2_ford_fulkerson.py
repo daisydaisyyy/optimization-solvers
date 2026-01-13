@@ -118,7 +118,7 @@ def max_flow_min_cut(capacity_graph, s, t, nodes):
             res_values.append(str(res_val))
 
         vector_str = "x = ( " + "  ".join(vector_values) + " )"
-        res_vector_str = "r = ( " + "  ".join(res_values) + " )"
+        res_vector_str = "\nr = ( " + "  ".join(res_values) + " )"
 
         iteration_details.append({
             'iteration': iteration,
@@ -251,3 +251,7 @@ def run_max_flow_analysis(file_path):
 
 if __name__ == "__main__":
     print(run_max_flow_analysis('graph.txt'))
+
+    print("\nWrite the final graph with (a,b): a = residual capacity, b = original capacity")
+    print("- Edges entering the cut have original capacity = a = b (saturated)")
+    print("- Edges entering the cut have a = 0, b = original capacity (empty)")

@@ -26,7 +26,7 @@ def parse_data(filename):
     
     if target_match:
         eq = target_match.group(1)
-        matches = re.findall(r'([+\-]?\s*\d+)\*x(\d+)', eq)
+        matches = re.findall(r'([+\-]?\s*\d+(?:\.\d+)?)\*x(\d+)', eq)
         for coeff_str, var_idx in matches:
             idx = int(var_idx) - 1
             if 0 <= idx < num_vars:
@@ -92,7 +92,7 @@ def main():
 
         y_B_fracs = [to_frac_str(val) for val in y_B_vals]
         
-        print("\nA_B^-1 (Fractions):")
+        print("\nA_B^-1:")
         for row in A_B_inv_fracs:
             print(f"  {row}")
 

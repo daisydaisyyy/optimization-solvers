@@ -367,25 +367,37 @@ def simplex_iteration(edges, nodes, node_costs, T, U, flow, potential):
 
     # theta
     theta = float('inf')
-    limiting_edge = None
-    
-    print("    Cycle (θ = min flow):")
+    leaving_edge = entering_edge
+    theta_p = []
+    theta_m = []
+    print("    Cycle (θ = min flow x):")
     for edge, change, cap, f in cycle_arcs:
         if change == 1: # flow increases
             resid = cap - f
             print(f"      {edge}: increases (resid cap: {resid})")
-            if resid < theta:
-                theta = resid
-                limiting_edge = edge
+            if edge != entering_edge:
+                theta_p.append(resid)
+                if resid < theta:
+                    theta = resid
+                    leaving_edge = edge
+
         else: # flow decreases
             resid = f
             print(f"      {edge}: decreases (resid flow: {resid})")
-            if resid < theta:
-                theta = resid
-                limiting_edge = edge
+            if edge != entering_edge:
+                theta_m.append(resid)
+                if resid < theta:
+                    theta = resid
+                    leaving_edge = edge
 
-    print(f"\n    θ = {theta} (limiting edge: {limiting_edge})")
-    
+    if(len(theta_p) != 0):
+        print(f"\n    θ+ = {min(theta_p)}")
+    if(len(theta_m) != 0):
+        print(f"    θ- = {min(theta_m)}")
+    print(f"    θ = {theta} (leaving edge: {leaving_edge})")
+    if leaving_edge == entering_edge:
+        print(">>> DEG CASE: leaving edge == entering edge!")
+
     # 4. Flow update
     new_flow = flow.copy()
     for edge, change, _, _ in cycle_arcs:
@@ -400,7 +412,7 @@ def simplex_iteration(edges, nodes, node_costs, T, U, flow, potential):
         if abs(new_flow[edge] - cap) < 1e-9: new_flow[edge] = cap
 
     # 5. Update partitions
-    leaving_edge = limiting_edge
+    leaving_edge = leaving_edge
     print(f">>> LEAVING EDGE: {leaving_edge}")
     
     new_T = T.copy()

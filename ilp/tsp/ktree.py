@@ -83,8 +83,7 @@ class KTreeSolver:
             mst_cost += w
             eq_parts.append(str(w))
             
-        print(f"\nEquation: {' + '.join(eq_parts)} = {mst_cost}")
-        print(f"v_I (Lower Bound) = {mst_cost}")
+        print(f"v_I (Lower Bound) = {' + '.join(eq_parts)} = {mst_cost}")
 
 if __name__ == "__main__":
     s = KTreeSolver("tsp.txt")
